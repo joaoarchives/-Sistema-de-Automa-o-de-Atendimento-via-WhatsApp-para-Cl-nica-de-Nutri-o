@@ -4,7 +4,7 @@
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-000000?style=for-the-badge&logo=flask&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-4479A1?style=for-the-badge&logo=mysql&logoColor=white)
 ![WhatsApp](https://img.shields.io/badge/WhatsApp_API-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)
 ![Status](https://img.shields.io/badge/Status-Em_Desenvolvimento-yellow?style=for-the-badge)
 
@@ -14,97 +14,76 @@
 
 ## 📌 Descrição
 
-Projeto em desenvolvimento com o objetivo de automatizar o atendimento de uma clínica de nutrição através do **WhatsApp Business API**.
+Projeto em desenvolvimento com o objetivo de automatizar o atendimento de uma clínica de nutrição através da **WhatsApp Business Cloud API (Meta)**.
 
 O sistema é responsável por:
 
-- 🤖 Atendimento automático inicial
-- 📅 Agendamento de consultas
-- 🕐 Controle de agenda com horários fixos
-- 📋 Envio automático de instruções pré-consulta
-- 🔔 Disparo de lembretes 12h antes da consulta
-- ✅ Confirmação e organização da agenda do nutricionista
+- 🤖 Atendimento automático via chatbot com máquina de estados
+- 📅 Agendamento de consultas (primeira consulta ou retorno)
+- 🕐 Controle de agenda por período (manhã/tarde) com slots de 30 minutos
+- 🔔 Lembretes automáticos de consulta via APScheduler
+- 👨‍⚕️ Notificações ao médico sobre novas consultas e resumo diário às 6h
+- 📋 Log completo de mensagens enviadas via WhatsApp
+- ❌ Cancelamento de consultas pelo próprio paciente
 
-> 💡 Este projeto está sendo desenvolvido como aplicação prática de estudos em **Python**, **Banco de Dados** e **Backend**.
-
----
-
-## 🎯 Objetivo do Projeto
-
-Criar um sistema escalável de automação que possa futuramente atender:
-
-- Clínicas de nutrição
-- Personal trainers
-- Clínicas odontológicas
-- Profissionais autônomos
-- Pequenas empresas
-
-O sistema será estruturado para permitir **adaptação a diferentes tipos de serviços**.
+> 💡 Projeto desenvolvido como aplicação prática de estudos em **Python**, **Banco de Dados** e **Backend**.
 
 ---
 
 ## 🏗️ Estrutura do Projeto
 
 ```
-whatsapp-clinica/
-├── app/
-│   ├── __init__.py
-│   ├── webhook.py          # Recebimento de mensagens da API Meta
-│   ├── bot.py              # Lógica principal do bot e fluxo de conversa
-│   ├── scheduler.py        # Agendamento de lembretes automáticos
-│   └── utils.py            # Funções auxiliares
-├── database/
-│   ├── models.py           # Modelos do banco de dados
-│   └── db.py               # Conexão e operações com o banco
+wppclinica/
+├── app.py                          # Webhook Flask (recebe/responde mensagens)
 ├── config/
-│   └── settings.py         # Variáveis de configuração
+│   └── settings.py                 # Configurações via variáveis de ambiente
+├── database/
+│   ├── init_db.py                  # Criação das tabelas MySQL
+│   ├── connection.py               # Conexão com o banco
+│   ├── clientes.py                 # CRUD de clientes/pacientes
+│   ├── consultas.py                # Agendamento, cancelamento e verificação de horários
+│   └── mensagens.py                # Log de mensagens WhatsApp enviadas
+├── services/
+│   ├── bot.py                      # Lógica do chatbot (máquina de estados)
+│   ├── whatsapp.py                 # Integração com a WhatsApp Cloud API
+│   ├── scheduler.py                # Lembretes automáticos com APScheduler
+│   └── notificacoes_medico.py      # Resumo diário e alertas ao médico
+├── utils/
+│   └── helpers.py                  # Funções auxiliares (datas, horários, JSON)
 ├── tests/
-│   └── test_bot.py         # Testes unitários
-├── .env.example            # Exemplo de variáveis de ambiente
+│   └── tests_bot.py
+├── .env.example                    # Exemplo de variáveis de ambiente
 ├── requirements.txt
 └── README.md
 ```
 
-| Arquivo | Descrição |
-|---|---|
-| `webhook.py` | Recebe e valida as mensagens da WhatsApp Cloud API |
-| `bot.py` | Controla o estado da conversa e a lógica de agendamento |
-| `scheduler.py` | Dispara lembretes automáticos com APScheduler |
-| `models.py` | Modelos de Cliente e Consulta no banco de dados |
-| `settings.py` | Centraliza configurações e variáveis de ambiente |
-
 ---
 
-## 🗄️ Modelo do Banco de Dados
+## 🗄️ Banco de Dados (MySQL)
 
 ```
-┌──────────────────────────┐         ┌──────────────────────────────┐
-│         clientes         │         │          consultas            │
-├──────────────────────────┤         ├──────────────────────────────┤
-│ id          INTEGER (PK) │◄────────│ id            INTEGER (PK)   │
-│ nome        TEXT         │         │ cliente_id    INTEGER (FK)   │
-│ telefone    TEXT UNIQUE  │         │ data_hora     DATETIME       │
-│ tipo        TEXT         │         │ tipo          TEXT           │
-│ criado_em   DATETIME     │         │ status        TEXT           │
-└──────────────────────────┘         │ lembrete_env  BOOLEAN        │
-                                     │ criado_em     DATETIME       │
-                                     └──────────────────────────────┘
-
-┌──────────────────────────┐
-│     estados_conversa     │
-├──────────────────────────┤
-│ telefone    TEXT (PK)    │
-│ estado      TEXT         │
-│ dados_tmp   TEXT (JSON)  │
-│ atualizado  DATETIME     │
-└──────────────────────────┘
+┌──────────────┐     ┌──────────────────┐     ┌──────────────────────┐
+│   clientes   │     │    consultas     │     │  mensagens_whatsapp  │
+├──────────────┤     ├──────────────────┤     ├──────────────────────┤
+│ id (PK)      │◄────│ id (PK)          │────►│ id (PK)              │
+│ telefone     │     │ telefone (FK)    │     │ consulta_id (FK)     │
+│ nome         │     │ tipo_consulta    │     │ telefone_destino     │
+│ sobrenome    │     │ data             │     │ tipo_mensagem        │
+│ sexo         │     │ horario          │     │ message_id           │
+└──────────────┘     │ status           │     │ status_envio         │
+                     │ medico_id (FK)   │     │ payload (JSON)       │
+┌──────────────┐     │ lembrete_enviado │     │ resposta_api (JSON)  │
+│   medicos    │◄────┤                  │     │ criado_em            │
+├──────────────┤     └──────────────────┘     └──────────────────────┘
+│ id (PK)      │
+│ nome         │     ┌────────────────────┐
+│ telefone     │     │  estados_conversa  │
+│ ativo        │     ├────────────────────┤
+└──────────────┘     │ telefone (PK)      │
+                     │ estado             │
+                     │ dados (JSON)       │
+                     └────────────────────┘
 ```
-
-| Tabela | Descrição |
-|---|---|
-| `clientes` | Dados dos pacientes (nome, telefone, tipo: primeira consulta ou retorno) |
-| `consultas` | Agendamentos com data/hora, status e controle de lembrete enviado |
-| `estados_conversa` | Persiste em qual etapa do fluxo cada usuário está |
 
 ---
 
@@ -114,36 +93,39 @@ whatsapp-clinica/
 [Usuário envia mensagem]
         │
         ▼
-[Bot verifica estado atual]
+[Verifica estado no banco]
         │
-        ├── INICIO ──────► Envia menu principal
-        │                        │
-        │              ┌─────────┴──────────┐
-        │              │                    │
-        │         [1] Agendar          [2] Cancelar
-        │              │                    │
-        │     Pergunta tipo de         Busca consultas
-        │     consulta                 do cliente
-        │              │
-        │    ┌──────────┴──────────┐
-        │    │                     │
-        │ [1] Primeira         [2] Retorno
-        │ consulta
-        │    │
-        │    ▼
-        │ Pergunta período (Manhã / Tarde)
-        │    │
-        │    ▼
-        │ Exibe horários disponíveis
-        │    │
-        │    ▼
-        │ Usuário escolhe horário
-        │    │
-        │    ▼
-        │ Confirma agendamento
-        │    │
-        │    ▼
-        └── Salva no banco ──► Envia confirmação + instruções pré-consulta
+   ┌────┴────┐
+   │  inicio │──► Exibe menu principal
+   └────┬────┘
+        │
+   ┌────┴────┐
+   │  menu   │──► 1: Agendar  │  2: Cancelar
+   └────┬────┘
+        │ (1)
+        ▼
+  tipo_consulta ──► 1: Primeira consulta  │  2: Retorno
+        │
+        ▼
+   periodo ──► 1: Manhã  │  2: Tarde
+        │
+        ▼
+   data ──► DD/MM (valida e busca horários disponíveis)
+        │
+        ▼
+   horario ──► Lista numerada de slots disponíveis
+        │
+        ▼
+   nome ──► Digita o nome
+        │
+        ▼
+   sexo ──► 1: Masculino  │  2: Feminino  │  3: Outro
+        │
+        ▼
+   confirmacao ──► 1: Confirmar  │  2: Cancelar
+        │
+        ▼
+   Salva consulta → Notifica médico → Retorna ao menu
 ```
 
 ---
@@ -153,12 +135,12 @@ whatsapp-clinica/
 | Tecnologia | Uso |
 |---|---|
 | Python 3.11+ | Linguagem principal |
-| Flask | Backend / Webhook |
-| SQLite | Banco de dados (MVP) |
-| APScheduler | Agendamento de lembretes |
+| Flask | Servidor web / Webhook |
+| MySQL | Banco de dados |
+| APScheduler | Lembretes e resumo diário automatizados |
 | WhatsApp Cloud API (Meta) | Envio e recebimento de mensagens |
 | python-dotenv | Gerenciamento de variáveis de ambiente |
-| ngrok | Exposição do webhook local (desenvolvimento) |
+| ngrok | Exposição do webhook em desenvolvimento |
 
 ---
 
@@ -167,22 +149,23 @@ whatsapp-clinica/
 ### Pré-requisitos
 
 - Python 3.11+
+- MySQL rodando localmente ou em nuvem
 - Conta na [Meta for Developers](https://developers.facebook.com/) com WhatsApp Business API configurada
-- [ngrok](https://ngrok.com/) instalado (para testes locais)
+- [ngrok](https://ngrok.com/) (para testes locais)
 
 ### 1. Clonar o repositório
 
 ```bash
-git clone https://github.com/joaoarchives/-Sistema-de-Automa-o-de-Atendimento-via-WhatsApp-para-Cl-nica-de-Nutri-o.git
-cd whatsapp-clinica
+git clone https://github.com/joaoarchives/wppclinica.git
+cd wppclinica
 ```
 
 ### 2. Criar e ativar ambiente virtual
 
 ```bash
-python -m venv venv
-source venv/bin/activate        # Linux/Mac
-venv\Scripts\activate           # Windows
+python -m venv .venv
+source .venv/bin/activate        # Linux/Mac
+.venv\Scripts\activate           # Windows
 ```
 
 ### 3. Instalar dependências
@@ -197,14 +180,7 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-Edite o `.env`:
-
-```env
-WHATSAPP_TOKEN=seu_token_aqui
-WHATSAPP_PHONE_ID=seu_phone_id_aqui
-VERIFY_TOKEN=token_de_verificacao_webhook
-DATABASE_URL=sqlite:///clinica.db
-```
+Edite o `.env` com suas credenciais reais.
 
 ### 5. Inicializar o banco de dados
 
@@ -212,10 +188,12 @@ DATABASE_URL=sqlite:///clinica.db
 python database/init_db.py
 ```
 
+> O script já insere um médico padrão na tabela `medicos`. Edite os dados do médico diretamente no `init_db.py` antes de rodar, ou atualize via SQL após.
+
 ### 6. Rodar a aplicação
 
 ```bash
-flask run
+python app.py
 ```
 
 ### 7. Expor o webhook com ngrok (desenvolvimento)
@@ -228,48 +206,31 @@ Copie a URL gerada (ex: `https://xxxx.ngrok.io`) e configure como webhook no pai
 
 ---
 
-## 🧠 Funcionalidades Planejadas
+## ✅ Funcionalidades Implementadas
 
-- [x] Estrutura base do projeto
 - [x] Menu automático de atendimento
-- [x] Escolha de período (manhã / tarde)
-- [ ] Bloqueio automático de horários ocupados
-- [ ] Diferenciação entre primeira consulta e retorno
+- [x] Agendamento com escolha de tipo, período, data e horário
+- [x] Bloqueio de horários já ocupados
+- [x] Diferenciação entre primeira consulta e retorno
+- [x] Cancelamento de consulta pelo paciente
+- [x] Notificação ao médico quando nova consulta é agendada para o dia
+- [x] Resumo diário ao médico às 06h via APScheduler
+- [x] Lembretes automáticos de consulta
+- [x] Log completo de mensagens enviadas
+- [x] Rastreamento de status das mensagens via webhook
+
+## 🔜 Funcionalidades Planejadas
+
 - [ ] Envio de instruções pré-consulta
-- [ ] Sistema de lembretes automáticos (12h antes)
-- [ ] Cancelamento de consultas via WhatsApp
-- [ ] Painel simples para o nutricionista ver a agenda
-
----
-
-## 📅 Status do Projeto
-
-🚧 **Em desenvolvimento**
-
-Etapas atuais:
-- Estruturação da lógica de horários
-- Estudo e implementação de geração de slots
-- Modelagem do banco de dados
-
----
-
-## 📚 Aprendizados Envolvidos
-
-Este projeto está sendo desenvolvido para consolidar conhecimentos em:
-
-- Lógica de programação
-- Estruturas de repetição
-- Manipulação de datas e horários
-- Modelagem de banco de dados
-- Desenvolvimento de APIs
-- Integração com serviços externos
+- [ ] Suporte a múltiplos médicos com agenda independente
+- [ ] Painel web para o nutricionista visualizar a agenda
 
 ---
 
 ## 👨‍💻 Autor
 
 **João Victor Mendes Silveira**  
-Bacharelado em Ciência da Computação – UDF  
+Bacharelado em Ciência da Computação – UDF
 
 [![GitHub](https://img.shields.io/badge/GitHub-joaoarchives-181717?style=for-the-badge&logo=github)](https://github.com/joaoarchives)
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-João_Victor-0077B5?style=for-the-badge&logo=linkedin&logoColor=white)](https://www.linkedin.com/in/joão-victor-m-silveira-478542311)
