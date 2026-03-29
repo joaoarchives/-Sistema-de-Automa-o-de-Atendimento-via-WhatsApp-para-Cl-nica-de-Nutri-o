@@ -1,3 +1,0 @@
-from services.notificacoes_medico import enviar_resumo_das_06
-
-enviar_resumo_das_06()
