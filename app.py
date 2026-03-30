@@ -2,6 +2,7 @@ import logging
 import os
 
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 from database.mensagens import atualizar_status_whatsapp, salvar_log_whatsapp
 from services.bot import processar_mensagem
@@ -14,6 +15,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+CORS(app, resources={r"/api/*": {"origins": "http://localhost:5173"}})
+
+from api import api as api_blueprint
+app.register_blueprint(api_blueprint)
 
 VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN")
 
