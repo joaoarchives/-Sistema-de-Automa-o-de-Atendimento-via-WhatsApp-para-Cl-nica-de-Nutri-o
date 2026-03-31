@@ -6,7 +6,10 @@ e devolver a mensagem de resposta ao usuário.
 
 Regras de negócio (horários, agendamento, cancelamento) → agendamento_service.py
 Persistência de estado                                   → database/estados.py
+IA (Gemini)                                              → services/gemini.py
 """
+from datetime import date
+
 from database.clientes import registrar_cliente_se_nao_existir
 from database.estados import get_estado, set_estado
 from services.agendamento_service import (
@@ -15,20 +18,26 @@ from services.agendamento_service import (
     cancelar_consulta,
     confirmar_agendamento,
 )
+from services.gemini import interpretar_data_periodo, responder_livre
 from utils.helpers import data_valida, formatar_data_br, formatar_data_iso
 
 _SAUDACOES = {"menu", "oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "obg"}
 
 _MENU = (
-    "Olá! Bem-vindo à clínica de nutrição.\n\n"
-    "Digite:\n"
+    "Olá! Bem-vindo à Clínica NutriVida. 🌿\n\n"
+    "Como posso te ajudar?\n\n"
     "1 - Agendar consulta\n"
-    "2 - Cancelar consulta"
+    "2 - Cancelar consulta\n\n"
+    "Ou me faça qualquer pergunta sobre nutrição!"
 )
 
 
 def _lista_horarios(horarios: list[str]) -> str:
     return "\n".join(f"{i + 1} - {h}" for i, h in enumerate(horarios))
+
+
+def _hoje_str() -> str:
+    return date.today().strftime("%d/%m/%Y")
 
 
 # ──────────────────────────────────────────────
@@ -49,7 +58,8 @@ def _handle_menu(telefone: str, mensagem: str, dados: dict) -> str:
             else "Você não possui consulta agendada para cancelar."
         )
 
-    return "Opção inválida. Digite 1 para agendar ou 2 para cancelar."
+    # Mensagem livre — usa Gemini para responder
+    return responder_livre(mensagem)
 
 
 def _handle_tipo_consulta(telefone: str, mensagem: str, dados: dict) -> str:
@@ -69,14 +79,32 @@ def _handle_periodo(telefone: str, mensagem: str, dados: dict) -> str:
 
     dados["periodo"] = periodos[mensagem]
     set_estado(telefone, "data", dados)
-    return "Digite a data desejada no formato DD/MM."
+    return "Digite a data desejada. Pode escrever normalmente, como \"amanhã de manhã\" ou no formato DD/MM."
 
 
 def _handle_data(telefone: str, mensagem: str, dados: dict) -> str:
-    if not data_valida(mensagem):
-        return "Data inválida. Digite uma data válida no formato DD/MM."
+    # Tenta formato padrão DD/MM primeiro
+    if data_valida(mensagem):
+        data_iso = formatar_data_iso(mensagem)
+    else:
+        # Tenta interpretar com Gemini
+        resultado = interpretar_data_periodo(mensagem, _hoje_str())
 
-    dados["data"] = formatar_data_iso(mensagem)
+        if not resultado.get("sucesso"):
+            return (
+                "Não consegui entender a data. "
+                "Pode escrever no formato DD/MM ou de outra forma? "
+                "Exemplo: 15/04 ou \"semana que vem de manhã\"."
+            )
+
+        data_iso = formatar_data_iso(resultado["data"][:5])  # pega DD/MM de DD/MM/AAAA
+
+        # Se o Gemini identificou o período, salva automaticamente
+        periodo_gemini = resultado.get("periodo")
+        if periodo_gemini and "periodo" not in dados:
+            dados["periodo"] = periodo_gemini
+
+    dados["data"] = data_iso
     disponiveis = buscar_horarios_disponiveis(dados["data"], dados["periodo"])
 
     if not disponiveis:
@@ -150,14 +178,12 @@ def _handle_confirmacao(telefone: str, mensagem: str, dados: dict) -> str:
         set_estado(telefone, "menu")
         return resultado.mensagem
 
-    # Horário roubado — tem outros disponíveis
     if resultado.horarios_disponiveis:
         dados.pop("horario", None)
         dados["horarios_disponiveis"] = resultado.horarios_disponiveis
         set_estado(telefone, "horario", dados)
         return f"{resultado.mensagem}\n{_lista_horarios(resultado.horarios_disponiveis)}"
 
-    # Sem vagas — pedir nova data
     dados.pop("horario", None)
     set_estado(telefone, "data", dados)
     return resultado.mensagem

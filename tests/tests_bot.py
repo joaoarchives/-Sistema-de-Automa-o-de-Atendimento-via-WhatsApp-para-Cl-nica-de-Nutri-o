@@ -38,18 +38,15 @@ DADOS_COMPLETOS = {
 # Helper de mock para o bot
 # ─────────────────────────────────────────────────────────────
 
+# No topo do arquivo, adiciona esse patch global
 @contextmanager
 def mock_bot(estado: str, dados: dict | None = None):
-    """
-    Mocka get_estado, set_estado e registrar_cliente_se_nao_existir.
-    Uso:
-        with mock_bot("menu") as (get_e, set_e):
-            resposta = bot._handle_menu(TELEFONE, "1", {})
-    """
     with (
         patch("services.bot.get_estado", return_value=(estado, dados or {})) as get_e,
         patch("services.bot.set_estado") as set_e,
         patch("services.bot.registrar_cliente_se_nao_existir"),
+        patch("services.bot.responder_livre", return_value="Resposta do Gemini"),
+        patch("services.bot.interpretar_data_periodo", return_value={"sucesso": False}),
     ):
         yield get_e, set_e
 
@@ -101,10 +98,10 @@ class TestHandleMenu:
                 resposta = bot._handle_menu(TELEFONE, "2", {})
                 assert "não possui consulta" in resposta
 
-    def test_opcao_invalida(self):
+    def test_opcao_invalida(self):  # em TestHandleMenu
         with mock_bot("menu"):
             resposta = bot._handle_menu(TELEFONE, "9", {})
-            assert "Opção inválida" in resposta
+            assert resposta == "Resposta do Gemini"  # agora vai pro Gemini
 
 
 # ─────────────────────────────────────────────────────────────
@@ -163,10 +160,10 @@ class TestHandlePeriodo:
 
 class TestHandleData:
 
-    def test_data_invalida(self):
+    def test_data_invalida(self):  # em TestHandleData
         with mock_bot("data"):
             resposta = bot._handle_data(TELEFONE, "99/99", {"periodo": "manha"})
-            assert "Data inválida" in resposta
+            assert "Não consegui entender" in resposta
 
     def test_data_valida_sem_horarios(self):
         with mock_bot("data") as (_, set_e):
