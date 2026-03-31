@@ -123,12 +123,15 @@ def get_consultas_historico(limit=20, offset=0):
                        FROM consultas c
                                 JOIN clientes cl ON cl.id = c.cliente_id
                                 JOIN medicos m ON m.id = c.medico_id
-                       WHERE c.data < %s
+                       WHERE c.status IN ('concluido', 'cancelado')
                        ORDER BY c.data DESC, c.horario DESC
                            LIMIT %s OFFSET %s
-                       """, (date.today(), limit, offset))
-        return cursor.fetchall()
-
+                       """, (limit, offset))
+        rows = cursor.fetchall()
+        for row in rows:
+            if 'data' in row and hasattr(row['data'], 'isoformat'):
+                row['data'] = row['data'].isoformat()
+        return rows
 
 def atualizar_status_consulta(consulta_id, novo_status, motivo=None):
     with get_db() as conn:
