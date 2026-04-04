@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = _BASE_DIR
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 
 app = Flask(__name__)
 
@@ -180,6 +181,14 @@ if __name__ == "__main__":
 @app.get("/health")
 def healthcheck():
     return jsonify({"status": "ok"}), 200
+
+
+@app.get("/assets/<path:filename>")
+def serve_asset(filename):
+    arquivo = ASSETS_DIR / filename
+    if arquivo.exists() and arquivo.is_file():
+        return send_from_directory(ASSETS_DIR, filename)
+    return jsonify({"erro": "Arquivo nao encontrado"}), 404
 
 @app.get("/")
 def serve_index():

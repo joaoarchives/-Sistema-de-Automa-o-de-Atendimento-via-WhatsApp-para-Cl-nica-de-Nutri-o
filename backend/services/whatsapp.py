@@ -1,5 +1,6 @@
 import logging
 import os
+from urllib.parse import quote
 
 import requests
 
@@ -12,6 +13,9 @@ WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v23.0")
 PIX_CHAVE = os.getenv("PIX_CHAVE", "")
 CARTAO_LINK = os.getenv("CARTAO_LINK", "")
 PDF_PLANOS_URL = os.getenv("PDF_PLANOS_URL", "")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "")
+RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+DEFAULT_PLANOS_FILENAME = "Planos 2026.pdf"
 
 _PLACEHOLDER_TOKENS = {"", "token_meta", "seu_token_aqui", "teste", "dummy"}
 _PLACEHOLDER_PHONE_IDS = {"", "id_meta", "seu_id_aqui", "teste", "dummy"}
@@ -37,6 +41,31 @@ def _is_configured() -> bool:
         (WHATSAPP_TOKEN or "").strip() not in _PLACEHOLDER_TOKENS
         and (WHATSAPP_PHONE_NUMBER_ID or "").strip() not in _PLACEHOLDER_PHONE_IDS
     )
+
+
+def _public_base_url() -> str:
+    base_url = (APP_BASE_URL or "").strip().rstrip("/")
+    if base_url:
+        return base_url
+
+    railway_domain = (RAILWAY_PUBLIC_DOMAIN or "").strip().rstrip("/")
+    if railway_domain:
+        if railway_domain.startswith(("http://", "https://")):
+            return railway_domain
+        return f"https://{railway_domain}"
+
+    return ""
+
+
+def resolved_pdf_planos_url() -> str:
+    if (PDF_PLANOS_URL or "").strip():
+        return PDF_PLANOS_URL.strip()
+
+    base_url = _public_base_url()
+    if not base_url:
+        return ""
+
+    return f"{base_url}/assets/{quote(DEFAULT_PLANOS_FILENAME)}"
 
 
 def _fake_response(payload: dict) -> dict:

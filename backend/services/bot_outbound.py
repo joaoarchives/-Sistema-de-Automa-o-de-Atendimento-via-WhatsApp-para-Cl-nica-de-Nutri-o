@@ -2,7 +2,12 @@ import logging
 
 from database.mensagens import salvar_log_whatsapp
 from services.bot_content import BOAS_VINDAS
-from services.whatsapp import PDF_PLANOS_URL, send_whatsapp_document, send_whatsapp_message
+from services.whatsapp import (
+    DEFAULT_PLANOS_FILENAME,
+    resolved_pdf_planos_url,
+    send_whatsapp_document,
+    send_whatsapp_message,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -36,14 +41,16 @@ def enviar_boas_vindas_iniciais(telefone: str) -> None:
     except Exception:
         logger.exception("Erro ao enviar mensagem de boas-vindas")
 
-    if not PDF_PLANOS_URL:
+    pdf_planos_url = resolved_pdf_planos_url()
+    if not pdf_planos_url:
+        logger.warning("PDF dos planos nao enviado: nenhuma URL publica disponivel.")
         return
 
     try:
         resultado = send_whatsapp_document(
             telefone,
-            PDF_PLANOS_URL,
-            "Planos_2026.pdf",
+            pdf_planos_url,
+            DEFAULT_PLANOS_FILENAME,
             "Confira nossos planos ??",
         )
         _registrar_envio(telefone, "documento", resultado)
