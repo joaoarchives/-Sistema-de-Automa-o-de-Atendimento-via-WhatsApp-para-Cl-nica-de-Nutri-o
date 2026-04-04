@@ -183,7 +183,7 @@ def healthcheck():
     return jsonify({"status": "ok"}), 200
 
 
-@app.get("/assets/<path:filename>")
+@app.get("/clinic-assets/<path:filename>")
 def serve_asset(filename):
     arquivo = ASSETS_DIR / filename
     if arquivo.exists() and arquivo.is_file():

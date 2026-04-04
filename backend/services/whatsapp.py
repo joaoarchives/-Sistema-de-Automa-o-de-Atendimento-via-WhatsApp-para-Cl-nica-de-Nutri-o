@@ -65,7 +65,7 @@ def resolved_pdf_planos_url() -> str:
     if not base_url:
         return ""
 
-    return f"{base_url}/assets/{quote(DEFAULT_PLANOS_FILENAME)}"
+    return f"{base_url}/clinic-assets/{quote(DEFAULT_PLANOS_FILENAME)}"
 
 
 def _fake_response(payload: dict) -> dict:
