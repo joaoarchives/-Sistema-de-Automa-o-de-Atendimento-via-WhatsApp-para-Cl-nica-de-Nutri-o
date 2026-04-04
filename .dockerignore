@@ -1,0 +1,11 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.env
+frontend/node_modules
+frontend/dist
+backend/__pycache__
+backend/.pytest_cache
+backend/tests/__pycache__
