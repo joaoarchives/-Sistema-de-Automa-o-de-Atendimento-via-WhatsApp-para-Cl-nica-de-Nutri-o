@@ -186,9 +186,10 @@ export default function Conversas() {
 const styles = {
   root: {
     display: "flex",
-    height: "calc(100vh - 64px)",
+    height: "100vh",
     gap: 0,
-    margin: -32,          // cancela o padding do Layout
+    margin: -32,
+    overflow: "hidden",
   },
 
   // lista
