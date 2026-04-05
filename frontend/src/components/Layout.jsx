@@ -133,6 +133,5 @@ const styles = {
     padding: 32,
     overflowY: "auto",
     background: "#0d1117",
-    overflow: "hidden",
   },
 };
