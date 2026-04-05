@@ -59,7 +59,7 @@ export default function Layout() {
 const styles = {
   wrapper: {
     display: "flex",
-    minHeight: "100vh",
+    height: "100vh",
     fontFamily: "system-ui, sans-serif",
     background: "#0d1117",
   },
