@@ -12,6 +12,7 @@ from database.consultas import (
     get_total_consultas_historico,
     atualizar_status_consulta,
 )
+from database.mensagens import get_conversas_lista, get_mensagens_por_telefone
 api = Blueprint("api", __name__, url_prefix="/api")
 
 SECRET_KEY = os.getenv("SECRET_KEY", "chave_secreta")
@@ -260,3 +261,63 @@ def listar_planos():
         }
         for p in planos
     ]})
+
+
+# ── Conversas (histórico WhatsApp) ───────────────────────────────────────────
+
+@api.route("/conversas", methods=["GET"])
+@token_required
+def listar_conversas():
+    """Lista todos os contatos com data da última mensagem e total."""
+    rows = get_conversas_lista()
+    resultado = []
+    for r in rows:
+        resultado.append({
+            "telefone":        r["telefone"],
+            "nome":            r["nome"] or r["telefone"],
+            "ultima_mensagem": r["ultima_mensagem"].isoformat() if r["ultima_mensagem"] else None,
+            "total_mensagens": r["total_mensagens"],
+            "ultimo_tipo":     r["ultimo_tipo"],
+        })
+    return jsonify({"conversas": resultado})
+
+
+@api.route("/conversas/<telefone>", methods=["GET"])
+@token_required
+def mensagens_por_telefone(telefone):
+    """Retorna todas as mensagens trocadas com um telefone específico."""
+    rows = get_mensagens_por_telefone(telefone)
+    mensagens = []
+    for r in rows:
+        payload = None
+        if r["payload"]:
+            try:
+                payload = json.loads(r["payload"])
+            except Exception:
+                payload = r["payload"]
+
+        # Extrai texto legível do payload quando possível
+        texto = None
+        if payload:
+            texto = (
+                payload.get("text")
+                or payload.get("body")
+                or (payload.get("template", {}) or {}).get("name")
+                or r["tipo_mensagem"]
+            )
+
+        mensagens.append({
+            "id":            r["id"],
+            "consulta_id":   r["consulta_id"],
+            "tipo_mensagem": r["tipo_mensagem"],
+            "message_id":    r["message_id"],
+            "status_envio":  r["status_envio"],
+            "texto":         texto or r["tipo_mensagem"],
+            "payload":       payload,
+            "criado_em":     r["criado_em"].isoformat() if r["criado_em"] else None,
+        })
+    return jsonify({
+        "telefone":  telefone,
+        "mensagens": mensagens,
+        "total":     len(mensagens),
+    })

@@ -1,10 +1,11 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { CalendarDays, CalendarRange, ClipboardList, LogOut } from "lucide-react";
+import { CalendarDays, CalendarRange, ClipboardList, MessageCircle, LogOut } from "lucide-react";
 
 const links = [
   { to: "/agenda/dia",    label: "Agenda do Dia",    Icon: CalendarDays },
   { to: "/agenda/semana", label: "Agenda da Semana", Icon: CalendarRange },
   { to: "/historico",     label: "Histórico",        Icon: ClipboardList },
+  { to: "/conversas",     label: "Conversas",        Icon: MessageCircle },
 ];
 
 export default function Layout() {

@@ -49,3 +49,11 @@ export const concluirConsulta = (id) =>
     api.patch(`/api/consultas/${id}/concluir`, {}, {
         headers: { 'Content-Type': 'application/json' }
     });
+
+export const getConversas = () =>
+    api.get("/api/conversas");
+
+export const getMensagensContato = (telefone) =>
+    api.get(`/api/conversas/${encodeURIComponent(telefone)}`);
+
+export default api;

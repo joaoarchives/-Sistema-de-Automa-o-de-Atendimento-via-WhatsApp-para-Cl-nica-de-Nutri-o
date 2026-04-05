@@ -59,3 +59,49 @@ def atualizar_status_whatsapp(
                 message_id,
             ),
         )
+
+
+def get_conversas_lista():
+    """Retorna lista de contatos com última mensagem e total."""
+    with get_db() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT
+                m.telefone_destino                        AS telefone,
+                cli.nome                                  AS nome,
+                MAX(m.criado_em)                          AS ultima_mensagem,
+                COUNT(*)                                  AS total_mensagens,
+                (
+                    SELECT tipo_mensagem
+                    FROM mensagens_whatsapp
+                    WHERE telefone_destino = m.telefone_destino
+                    ORDER BY criado_em DESC
+                    LIMIT 1
+                )                                         AS ultimo_tipo
+            FROM mensagens_whatsapp m
+            LEFT JOIN clientes cli ON cli.telefone = m.telefone_destino
+            GROUP BY m.telefone_destino, cli.nome
+            ORDER BY ultima_mensagem DESC
+        """)
+        return cursor.fetchall()
+
+
+def get_mensagens_por_telefone(telefone: str):
+    """Retorna todas as mensagens de um telefone específico."""
+    with get_db() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT
+                m.id,
+                m.consulta_id,
+                m.telefone_destino,
+                m.tipo_mensagem,
+                m.message_id,
+                m.status_envio,
+                m.payload,
+                m.criado_em
+            FROM mensagens_whatsapp m
+            WHERE m.telefone_destino = %s
+            ORDER BY m.criado_em ASC
+        """, (telefone,))
+        return cursor.fetchall()

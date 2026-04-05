@@ -3,6 +3,7 @@ import Login from "./pages/Login";
 import AgendaDia from "./pages/AgendaDia";
 import AgendaSemana from "./pages/AgendaSemana";
 import Historico from "./pages/Historico";
+import Conversas from "./pages/Conversas";
 import Layout from "./components/Layout";
 
 function RotaProtegida({ children }) {
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="agenda/dia" element={<AgendaDia />} />
           <Route path="agenda/semana" element={<AgendaSemana />} />
           <Route path="historico" element={<Historico />} />
+          <Route path="conversas" element={<Conversas />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
