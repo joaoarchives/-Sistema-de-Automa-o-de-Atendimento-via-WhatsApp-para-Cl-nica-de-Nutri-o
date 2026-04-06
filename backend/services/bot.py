@@ -121,11 +121,8 @@ def _handle_boas_vindas(telefone: str, mensagem: str, dados: dict) -> BotRespons
     """Estado após a saudação inicial. Usa Gemini para detectar intenção."""
 
     if mensagem in _SAUDACOES:
-        set_estado(telefone, "boas_vindas", dados)
-        return BotResponse(texto=(
-            "Olá! 😊\n\n"
-            "Você gostaria de agendar uma consulta ou tem alguma dúvida sobre os planos e serviços?"
-        ))
+        _enviar_boas_vindas(telefone)
+        return BotResponse(texto="")
 
     # Agradecimento/encerramento — responde e mantém no estado
     if mensagem in _AGRADECIMENTOS:
