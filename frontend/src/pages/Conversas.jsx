@@ -143,7 +143,7 @@ export default function Conversas() {
                       {formatarHora(m.criado_em)}
                     </span>
                   </div>
-                  <p style={s.bolhaTexto}>{m.texto}</p>
+                  <p style={s.bolhaTexto}>{typeof m.texto === 'string' ? m.texto : JSON.stringify(m.texto)}</p>
                   <div style={s.bolhaFooter}>
                     {iconeStatus(m.status_envio)}
                     <span style={s.statusTxt}>{m.status_envio}</span>

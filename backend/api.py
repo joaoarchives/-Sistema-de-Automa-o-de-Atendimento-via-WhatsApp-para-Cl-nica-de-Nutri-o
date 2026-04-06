@@ -299,12 +299,17 @@ def mensagens_por_telefone(telefone):
         # Extrai texto legível do payload quando possível
         texto = None
         if payload:
-            texto = (
+            raw = (
                 payload.get("text")
                 or payload.get("body")
                 or (payload.get("template", {}) or {}).get("name")
-                or r["tipo_mensagem"]
             )
+            if isinstance(raw, str):
+                texto = raw
+            elif isinstance(raw, dict):
+                texto = raw.get("body") or raw.get("text") or r["tipo_mensagem"]
+            elif raw is not None:
+                texto = str(raw)
 
         mensagens.append({
             "id":            r["id"],
