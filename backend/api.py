@@ -36,6 +36,24 @@ def limpar_row(row):
             resultado[k] = v
     return resultado
 
+
+def extrair_texto_payload(payload, fallback=""):
+    if not payload:
+        return fallback
+
+    raw = (
+        payload.get("text")
+        or payload.get("body")
+        or (payload.get("template", {}) or {}).get("name")
+    )
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        return raw.get("body") or raw.get("text") or fallback
+    if raw is not None:
+        return str(raw)
+    return fallback
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -273,12 +291,19 @@ def listar_conversas():
     rows = get_conversas_lista()
     resultado = []
     for r in rows:
+        ultimo_payload = None
+        if r.get("ultimo_payload"):
+            try:
+                ultimo_payload = json.loads(r["ultimo_payload"])
+            except Exception:
+                ultimo_payload = None
         resultado.append({
             "telefone":        r["telefone"],
             "nome":            r["nome"] or r["telefone"],
             "ultima_mensagem": r["ultima_mensagem"].isoformat() if r["ultima_mensagem"] else None,
             "total_mensagens": r["total_mensagens"],
             "ultimo_tipo":     r["ultimo_tipo"],
+            "ultima_previa":   extrair_texto_payload(ultimo_payload, r["ultimo_tipo"]),
         })
     return jsonify({"conversas": resultado})
 
@@ -318,7 +343,7 @@ def mensagens_por_telefone(telefone):
             "tipo_mensagem": r["tipo_mensagem"],
             "message_id":    r["message_id"],
             "status_envio":  r["status_envio"],
-            "texto":         texto or r["tipo_mensagem"],
+            "texto":         extrair_texto_payload(payload, texto or r["tipo_mensagem"]),
             "payload":       payload,
             "criado_em":     r["criado_em"].isoformat() if r["criado_em"] else None,
         })

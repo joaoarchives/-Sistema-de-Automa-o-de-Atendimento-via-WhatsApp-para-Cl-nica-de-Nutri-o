@@ -1,15 +1,13 @@
-import { useState, useEffect, useCallback } from "react";
-import { MessageCircle, ChevronLeft, Clock, CheckCheck, AlertCircle } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { MessageCircle, Search, CheckCheck, AlertCircle } from "lucide-react";
 import api from "../api/api";
 
-function formatarData(iso) {
+function formatarDataLista(iso) {
   if (!iso) return "";
-  const d = new Date(iso);
-  const diff = Date.now() - d;
-  if (diff < 60_000) return "agora";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}min`;
-  if (diff < 86_400_000) return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  const data = new Date(iso);
+  const dia = data.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  const hora = data.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  return `${dia}, ${hora}`;
 }
 
 function formatarHora(iso) {
@@ -17,39 +15,47 @@ function formatarHora(iso) {
   return new Date(iso).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function resumoTexto(texto, fallback = "") {
+  const base = String(texto || fallback || "").replace(/\s+/g, " ").trim();
+  if (!base) return "Sem mensagens";
+  return base.length > 34 ? `${base.slice(0, 34)}...` : base;
+}
+
 function iconeStatus(status) {
-  if (status === "enviado")  return <CheckCheck size={12} color="#8b949e" />;
-  if (status === "entregue") return <CheckCheck size={12} color="#00b37e" />;
-  if (status === "falhou")   return <AlertCircle size={12} color="#f85149" />;
+  if (status === "enviado") return <CheckCheck size={12} color="#94a3b8" />;
+  if (status === "entregue") return <CheckCheck size={12} color="#4ade80" />;
+  if (status === "falhou") return <AlertCircle size={12} color="#f87171" />;
   return null;
 }
 
-function etiquetaTipo(tipo) {
-  const mapa = {
-    confirmacao:           "confirmação",
-    lembrete_24h:          "lembrete 24h",
-    lembrete_1h:           "lembrete 1h",
-    agendamento_pendente:  "pend. pagamento",
-    cancelamento:          "cancelamento",
-    confirmacao_pagamento: "pagto confirmado",
-  };
-  return mapa[tipo] || tipo;
+function inicial(contato) {
+  const numero = String(contato?.telefone || "").replace(/\D/g, "");
+  if (numero) return numero.slice(-1);
+  const nome = String(contato?.nome || "?").trim();
+  return nome[0]?.toUpperCase() || "?";
+}
+
+function isSaida(mensagem) {
+  return Boolean(mensagem.status_envio);
 }
 
 export default function Conversas() {
-  const [conversas,    setConversas]    = useState([]);
-  const [selecionado,  setSelecionado]  = useState(null);
-  const [mensagens,    setMensagens]    = useState([]);
+  const [conversas, setConversas] = useState([]);
+  const [selecionado, setSelecionado] = useState(null);
+  const [mensagens, setMensagens] = useState([]);
+  const [busca, setBusca] = useState("");
   const [loadingLista, setLoadingLista] = useState(false);
-  const [loadingChat,  setLoadingChat]  = useState(false);
-  const [erro,         setErro]         = useState("");
+  const [loadingChat, setLoadingChat] = useState(false);
+  const [erro, setErro] = useState("");
 
   const carregarLista = useCallback(async () => {
     setLoadingLista(true);
     setErro("");
     try {
       const res = await api.get("/api/conversas");
-      setConversas(res.data.conversas || []);
+      const lista = res.data.conversas || [];
+      setConversas(lista);
+      setSelecionado((atual) => atual || lista[0] || null);
     } catch {
       setErro("Erro ao carregar conversas.");
     } finally {
@@ -57,12 +63,9 @@ export default function Conversas() {
     }
   }, []);
 
-  useEffect(() => { carregarLista(); }, [carregarLista]);
-
-  async function abrirConversa(contato) {
+  const abrirConversa = useCallback(async (contato) => {
     setSelecionado(contato);
     setLoadingChat(true);
-    setMensagens([]);
     try {
       const res = await api.get(`/api/conversas/${encodeURIComponent(contato.telefone)}`);
       setMensagens(res.data.mensagens || []);
@@ -71,160 +74,349 @@ export default function Conversas() {
     } finally {
       setLoadingChat(false);
     }
-  }
+  }, []);
 
-  // Layout sem tricks: painel lateral fixo + chat scrollável
+  useEffect(() => {
+    carregarLista();
+  }, [carregarLista]);
+
+  useEffect(() => {
+    if (selecionado?.telefone) {
+      abrirConversa(selecionado);
+    }
+  }, [selecionado?.telefone]);
+
+  const conversasFiltradas = useMemo(() => {
+    const termo = busca.trim().toLowerCase();
+    if (!termo) return conversas;
+    return conversas.filter((c) =>
+      [c.nome, c.telefone, c.ultima_previa, c.ultimo_tipo]
+        .filter(Boolean)
+        .some((valor) => String(valor).toLowerCase().includes(termo)),
+    );
+  }, [busca, conversas]);
+
   return (
-    <div style={s.wrap}>
-      {/* lista */}
-      <div style={s.painel}>
-        <div style={s.painelHeader}>
-          <h2 style={s.titulo}>Conversas</h2>
-          <p style={s.sub}>{conversas.length} contato(s)</p>
-        </div>
-        {loadingLista && <p style={s.info}>Carregando...</p>}
-        {erro         && <p style={s.erroTxt}>{erro}</p>}
-        {!loadingLista && conversas.length === 0 && (
-          <div style={s.vazio}>
-            <MessageCircle size={28} color="#30363d" />
-            <p>Nenhuma conversa ainda.</p>
+    <div style={s.page}>
+      <aside style={s.sidebar}>
+        <div style={s.sidebarHeader}>
+          <h1 style={s.title}>Conversas</h1>
+          <div style={s.searchBox}>
+            <Search size={15} color="#64748b" />
+            <input
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar paciente..."
+              style={s.searchInput}
+            />
           </div>
-        )}
-        <div style={s.lista}>
-          {conversas.map((c) => {
-            const ativo = selecionado?.telefone === c.telefone;
+        </div>
+
+        <div style={s.contactList}>
+          {loadingLista && <p style={s.sideInfo}>Carregando...</p>}
+          {erro && <p style={s.sideError}>{erro}</p>}
+          {!loadingLista && !conversasFiltradas.length && <p style={s.sideInfo}>Nenhuma conversa.</p>}
+
+          {conversasFiltradas.map((contato) => {
+            const ativo = selecionado?.telefone === contato.telefone;
             return (
-              <button key={c.telefone} onClick={() => abrirConversa(c)}
-                style={{ ...s.item, ...(ativo ? s.itemAtivo : {}) }}>
-                <div style={s.avatar}>{(c.nome?.[0] || "?").toUpperCase()}</div>
-                <div style={s.itemInfo}>
-                  <div style={s.itemNome}>{c.nome}</div>
-                  <div style={s.itemTel}>{c.telefone}</div>
-                  <div style={s.itemUltimo}>{etiquetaTipo(c.ultimo_tipo)}</div>
-                </div>
-                <div style={s.itemMeta}>
-                  <span style={s.itemHora}>{formatarData(c.ultima_mensagem)}</span>
-                  <span style={s.itemBadge}>{c.total_mensagens}</span>
+              <button
+                key={contato.telefone}
+                onClick={() => abrirConversa(contato)}
+                style={{ ...s.contactItem, ...(ativo ? s.contactItemActive : {}) }}
+              >
+                <div style={s.avatar}>{inicial(contato)}</div>
+                <div style={s.contactMain}>
+                  <div style={s.contactTop}>
+                    <div style={s.contactName}>{contato.nome || contato.telefone}</div>
+                    <div style={s.contactDate}>{formatarDataLista(contato.ultima_mensagem)}</div>
+                  </div>
+                  <div style={s.contactPreview}>
+                    <span style={s.contactPreviewIcon}>🗓️</span>
+                    <span style={s.contactPreviewText}>
+                      {resumoTexto(contato.ultima_previa, contato.ultimo_tipo)}
+                    </span>
+                  </div>
                 </div>
               </button>
             );
           })}
         </div>
-      </div>
+      </aside>
 
-      {/* chat */}
-      <div style={s.chat}>
+      <section style={s.chat}>
         {!selecionado ? (
-          <div style={s.chatVazio}>
-            <MessageCircle size={40} color="#30363d" />
-            <p style={{ color: "#8b949e", fontSize: 14, marginTop: 12 }}>Selecione uma conversa</p>
+          <div style={s.emptyState}>
+            <MessageCircle size={40} color="#314155" />
+            <p style={s.emptyText}>Selecione uma conversa</p>
           </div>
         ) : (
-          <div style={s.chatInner}>
-            <div style={s.chatHeader}>
-              <button style={s.voltarBtn} onClick={() => setSelecionado(null)}>
-                <ChevronLeft size={16} />
-              </button>
-              <div style={s.avatar}>{(selecionado.nome?.[0] || "?").toUpperCase()}</div>
+          <>
+            <header style={s.chatHeader}>
+              <div style={s.avatarLarge}>{inicial(selecionado)}</div>
               <div>
-                <div style={s.chatNome}>{selecionado.nome}</div>
-                <div style={s.chatTel}>{selecionado.telefone}</div>
+                <div style={s.headerName}>{selecionado.nome || selecionado.telefone}</div>
+                <div style={s.headerPhone}>{selecionado.telefone}</div>
               </div>
-            </div>
-            <div style={s.mensagensWrap}>
-              {loadingChat && <p style={s.info}>Carregando mensagens...</p>}
-              {!loadingChat && mensagens.length === 0 && <p style={s.info}>Nenhuma mensagem encontrada.</p>}
-              {mensagens.map((m) => (
-                <div key={m.id} style={s.bolha}>
-                  <div style={s.bolhaHeader}>
-                    <span style={s.bolhaTipo}>{etiquetaTipo(m.tipo_mensagem)}</span>
-                    <span style={s.bolhaHora}>
-                      <Clock size={10} style={{ marginRight: 3 }} />
-                      {formatarHora(m.criado_em)}
-                    </span>
+            </header>
+
+            <div style={s.chatBody}>
+              {loadingChat && <p style={s.sideInfo}>Carregando mensagens...</p>}
+              {!loadingChat && !mensagens.length && <p style={s.sideInfo}>Nenhuma mensagem encontrada.</p>}
+
+              {mensagens.map((mensagem) => {
+                const saida = isSaida(mensagem);
+                return (
+                  <div
+                    key={mensagem.id}
+                    style={{
+                      ...s.row,
+                      justifyContent: saida ? "flex-end" : "flex-start",
+                    }}
+                  >
+                    <div style={{ ...s.bubble, ...(saida ? s.bubbleOut : s.bubbleIn) }}>
+                      {saida && <div style={s.label}>Sofia</div>}
+                      <div style={s.text}>{mensagem.texto}</div>
+                      <div style={s.meta}>
+                        <span>{formatarHora(mensagem.criado_em)}</span>
+                        {saida && iconeStatus(mensagem.status_envio)}
+                      </div>
+                    </div>
                   </div>
-                  <p style={s.bolhaTexto}>{typeof m.texto === 'string' ? m.texto : JSON.stringify(m.texto)}</p>
-                  <div style={s.bolhaFooter}>
-                    {iconeStatus(m.status_envio)}
-                    <span style={s.statusTxt}>{m.status_envio}</span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
-          </div>
+          </>
         )}
-      </div>
+      </section>
     </div>
   );
 }
 
 const s = {
-  wrap: {
+  page: {
     display: "flex",
     marginTop: -32,
     marginLeft: -32,
     marginRight: -32,
     marginBottom: -32,
-    height: "calc(100vh - 0px)",
-    background: "#0d1117",
+    minHeight: "100vh",
+    background: "#0d131b",
+    color: "#e5edf6",
     overflow: "hidden",
   },
-  painel: {
-    width: 280,
-    minWidth: 280,
-    borderRight: "0.5px solid #30363d",
+  sidebar: {
+    width: 330,
+    minWidth: 330,
+    background: "#171d25",
+    borderRight: "1px solid #283445",
     display: "flex",
     flexDirection: "column",
-    height: "100%",
-    overflow: "hidden",
   },
-  painelHeader: { padding: "24px 20px 16px", borderBottom: "0.5px solid #30363d", flexShrink: 0 },
-  titulo:  { margin: 0, fontSize: 18, fontWeight: 600, color: "#e6edf3" },
-  sub:     { margin: "4px 0 0", fontSize: 12, color: "#8b949e" },
-  info:    { color: "#8b949e", fontSize: 13, padding: "16px 20px" },
-  erroTxt: { color: "#f85149", fontSize: 13, padding: "16px 20px" },
-  vazio: {
-    display: "flex", flexDirection: "column", alignItems: "center",
-    justifyContent: "center", flex: 1, color: "#8b949e", fontSize: 13, gap: 8,
+  sidebarHeader: {
+    padding: "22px 18px 14px",
+    borderBottom: "1px solid #283445",
   },
-  lista: { flex: 1, overflowY: "auto" },
-  item: {
-    width: "100%", display: "flex", alignItems: "flex-start", gap: 10,
-    padding: "12px 16px", background: "transparent", border: "none",
-    borderBottom: "0.5px solid #21262d", cursor: "pointer", textAlign: "left",
+  title: {
+    margin: 0,
+    marginBottom: 14,
+    fontSize: 17,
+    fontWeight: 700,
   },
-  itemAtivo: { background: "#1c2128" },
+  searchBox: {
+    display: "flex",
+    alignItems: "center",
+    gap: 10,
+    height: 36,
+    padding: "0 12px",
+    background: "#0f141b",
+    border: "1px solid #2a3443",
+    borderRadius: 10,
+  },
+  searchInput: {
+    width: "100%",
+    background: "transparent",
+    border: "none",
+    outline: "none",
+    color: "#d8e1eb",
+    fontSize: 14,
+  },
+  contactList: {
+    flex: 1,
+    overflowY: "auto",
+    padding: 10,
+  },
+  sideInfo: {
+    padding: 16,
+    color: "#93a4b8",
+    fontSize: 13,
+  },
+  sideError: {
+    padding: 16,
+    color: "#f87171",
+    fontSize: 13,
+  },
+  contactItem: {
+    width: "100%",
+    display: "flex",
+    gap: 12,
+    padding: "12px 10px",
+    background: "transparent",
+    border: "none",
+    borderRadius: 12,
+    color: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+  },
+  contactItemActive: {
+    background: "#202833",
+  },
   avatar: {
-    width: 36, height: 36, borderRadius: "50%", background: "#00b37e22", color: "#00b37e",
-    display: "flex", alignItems: "center", justifyContent: "center",
-    fontSize: 14, fontWeight: 700, flexShrink: 0,
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    background: "#2563eb",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 18,
+    fontWeight: 700,
+    flexShrink: 0,
   },
-  itemInfo:   { flex: 1, minWidth: 0 },
-  itemNome:   { fontSize: 13, fontWeight: 500, color: "#e6edf3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  itemTel:    { fontSize: 11, color: "#8b949e", marginTop: 1 },
-  itemUltimo: { fontSize: 11, color: "#58a6ff", marginTop: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  itemMeta:   { display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4, flexShrink: 0 },
-  itemHora:   { fontSize: 11, color: "#8b949e" },
-  itemBadge:  { background: "#00b37e22", color: "#00b37e", borderRadius: 10, fontSize: 10, padding: "1px 6px", fontWeight: 600 },
-  chat: { flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", height: "100%" },
-  chatVazio: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" },
-  chatInner: { display: "flex", flexDirection: "column", height: "100%" },
+  avatarLarge: {
+    width: 40,
+    height: 40,
+    borderRadius: 999,
+    background: "#2563eb",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 18,
+    fontWeight: 700,
+    flexShrink: 0,
+  },
+  contactMain: {
+    flex: 1,
+    minWidth: 0,
+  },
+  contactTop: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+  },
+  contactName: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#eef4fb",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  contactDate: {
+    fontSize: 11,
+    color: "#94a3b8",
+    flexShrink: 0,
+  },
+  contactPreview: {
+    display: "flex",
+    gap: 6,
+    alignItems: "center",
+    marginTop: 6,
+    color: "#94a3b8",
+    fontSize: 12,
+  },
+  contactPreviewIcon: {
+    flexShrink: 0,
+  },
+  contactPreviewText: {
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  chat: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    background: "#0c1219",
+  },
   chatHeader: {
-    display: "flex", alignItems: "center", gap: 12, padding: "16px 20px",
-    borderBottom: "0.5px solid #30363d", flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+    padding: "16px 22px",
+    background: "#171d25",
+    borderBottom: "1px solid #283445",
   },
-  voltarBtn: { display: "none", background: "transparent", border: "none", color: "#8b949e", cursor: "pointer" },
-  chatNome: { fontSize: 14, fontWeight: 600, color: "#e6edf3" },
-  chatTel:  { fontSize: 12, color: "#8b949e" },
-  mensagensWrap: {
-    flex: 1, overflowY: "auto", padding: 20,
-    display: "flex", flexDirection: "column", gap: 10,
+  headerName: {
+    fontSize: 15,
+    fontWeight: 700,
   },
-  bolha: { background: "#161b22", border: "0.5px solid #30363d", borderRadius: 10, padding: "10px 14px", maxWidth: 520 },
-  bolhaHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 },
-  bolhaTipo:   { fontSize: 11, fontWeight: 600, color: "#58a6ff", background: "#58a6ff15", borderRadius: 4, padding: "2px 6px" },
-  bolhaHora:   { display: "flex", alignItems: "center", fontSize: 11, color: "#8b949e" },
-  bolhaTexto:  { margin: 0, fontSize: 13, color: "#e6edf3", lineHeight: 1.55, whiteSpace: "pre-wrap" },
-  bolhaFooter: { display: "flex", alignItems: "center", gap: 4, marginTop: 6 },
-  statusTxt:   { fontSize: 11, color: "#8b949e" },
+  headerPhone: {
+    marginTop: 2,
+    color: "#7e8ea4",
+    fontSize: 13,
+  },
+  chatBody: {
+    flex: 1,
+    overflowY: "auto",
+    padding: "18px 22px 24px",
+    display: "flex",
+    flexDirection: "column",
+    gap: 10,
+  },
+  emptyState: {
+    flex: 1,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  emptyText: {
+    marginTop: 12,
+    color: "#8ea0b5",
+    fontSize: 14,
+  },
+  row: {
+    display: "flex",
+    width: "100%",
+  },
+  bubble: {
+    maxWidth: 600,
+    borderRadius: 16,
+    padding: "12px 14px 10px",
+    boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+  },
+  bubbleOut: {
+    background: "#123f69",
+    color: "#eff7ff",
+    borderTopRightRadius: 6,
+  },
+  bubbleIn: {
+    background: "#202833",
+    color: "#edf2f7",
+    borderTopLeftRadius: 6,
+  },
+  label: {
+    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#b8cef2",
+  },
+  text: {
+    fontSize: 15,
+    lineHeight: 1.5,
+    whiteSpace: "pre-wrap",
+  },
+  meta: {
+    marginTop: 8,
+    display: "flex",
+    justifyContent: "flex-end",
+    alignItems: "center",
+    gap: 6,
+    fontSize: 12,
+    color: "rgba(226,232,240,0.72)",
+  },
 };

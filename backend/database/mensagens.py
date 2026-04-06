@@ -77,7 +77,14 @@ def get_conversas_lista():
                     WHERE telefone_destino = m.telefone_destino
                     ORDER BY criado_em DESC
                     LIMIT 1
-                )                                         AS ultimo_tipo
+                )                                         AS ultimo_tipo,
+                (
+                    SELECT payload
+                    FROM mensagens_whatsapp
+                    WHERE telefone_destino = m.telefone_destino
+                    ORDER BY criado_em DESC
+                    LIMIT 1
+                )                                         AS ultimo_payload
             FROM mensagens_whatsapp m
             LEFT JOIN clientes cli ON cli.telefone = m.telefone_destino
             GROUP BY m.telefone_destino, cli.nome
