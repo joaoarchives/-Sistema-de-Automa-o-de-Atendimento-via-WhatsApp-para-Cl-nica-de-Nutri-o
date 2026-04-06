@@ -165,21 +165,21 @@ export default function Conversas() {
               {!loadingChat && !mensagens.length && <p style={s.sideInfo}>Nenhuma mensagem encontrada.</p>}
 
               {mensagens.map((mensagem) => {
-                const saida = isSaida(mensagem);
+                const bot = isSaida(mensagem);
                 return (
                   <div
                     key={mensagem.id}
                     style={{
                       ...s.row,
-                      justifyContent: saida ? "flex-end" : "flex-start",
+                      justifyContent: bot ? "flex-start" : "flex-end",
                     }}
                   >
-                    <div style={{ ...s.bubble, ...(saida ? s.bubbleOut : s.bubbleIn) }}>
-                      {saida && <div style={s.label}>Sofia</div>}
+                    <div style={{ ...s.bubble, ...(bot ? s.bubbleBot : s.bubbleCliente) }}>
+                      {bot && <div style={s.label}>Sofia</div>}
                       <div style={s.text}>{mensagem.texto}</div>
                       <div style={s.meta}>
                         <span>{formatarHora(mensagem.criado_em)}</span>
-                        {saida && iconeStatus(mensagem.status_envio)}
+                        {bot && iconeStatus(mensagem.status_envio)}
                       </div>
                     </div>
                   </div>
@@ -366,6 +366,9 @@ const s = {
     display: "flex",
     flexDirection: "column",
     gap: 10,
+    backgroundColor: "#0b141a",
+    backgroundImage: "radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px)",
+    backgroundSize: "18px 18px",
   },
   emptyState: {
     flex: 1,
@@ -384,31 +387,34 @@ const s = {
     width: "100%",
   },
   bubble: {
-    maxWidth: 600,
+    width: "fit-content",
+    maxWidth: "72%",
+    minWidth: 96,
     borderRadius: 16,
-    padding: "12px 14px 10px",
-    boxShadow: "0 10px 24px rgba(0,0,0,0.18)",
+    padding: "10px 12px 8px",
+    boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
   },
-  bubbleOut: {
-    background: "#123f69",
-    color: "#eff7ff",
-    borderTopRightRadius: 6,
-  },
-  bubbleIn: {
-    background: "#202833",
-    color: "#edf2f7",
+  bubbleBot: {
+    background: "#202c33",
+    color: "#e9edef",
     borderTopLeftRadius: 6,
+  },
+  bubbleCliente: {
+    background: "#005c4b",
+    color: "#e9edef",
+    borderTopRightRadius: 6,
   },
   label: {
     marginBottom: 8,
     fontSize: 12,
     fontWeight: 700,
-    color: "#b8cef2",
+    color: "#8ad1ff",
   },
   text: {
-    fontSize: 15,
-    lineHeight: 1.5,
+    fontSize: 14,
+    lineHeight: 1.45,
     whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
   },
   meta: {
     marginTop: 8,
@@ -416,7 +422,7 @@ const s = {
     justifyContent: "flex-end",
     alignItems: "center",
     gap: 6,
-    fontSize: 12,
-    color: "rgba(226,232,240,0.72)",
+    fontSize: 11,
+    color: "rgba(233,237,239,0.72)",
   },
 };
