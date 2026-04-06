@@ -59,7 +59,7 @@ def extrair_texto_payload(payload, fallback=""):
     return fallback
 
 
-def inferir_sender(status_envio: str | None) -> str:
+def inferir_sender_type(status_envio: str | None) -> str:
     return "client" if status_envio == "recebido" else "bot"
 
 
@@ -411,10 +411,14 @@ def mensagens_por_telefone(telefone):
             elif raw is not None:
                 texto = str(raw)
 
+        sender_type = inferir_sender_type(r["status_envio"])
+
         mensagens.append({
             "id":            r["id"],
             "consulta_id":   r["consulta_id"],
-            "sender":        inferir_sender(r["status_envio"]),
+            "sender":        sender_type,
+            "senderType":    sender_type,
+            "direction":     "incoming" if sender_type == "client" else "outgoing",
             "tipo_mensagem": r["tipo_mensagem"],
             "message_id":    r["message_id"],
             "status_envio":  r["status_envio"],

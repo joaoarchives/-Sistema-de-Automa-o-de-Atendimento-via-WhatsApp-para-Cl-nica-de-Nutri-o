@@ -35,8 +35,52 @@ function inicial(contato) {
   return nome[0]?.toUpperCase() || "?";
 }
 
-function isSaida(mensagem) {
-  return mensagem.sender ? mensagem.sender === "bot" : Boolean(mensagem.status_envio);
+function normalizarSenderType(mensagem) {
+  const senderBruto = String(
+    mensagem?.senderType ??
+    mensagem?.sender ??
+    mensagem?.role ??
+    mensagem?.author ??
+    mensagem?.from ??
+    "",
+  ).trim().toLowerCase();
+
+  if (["client", "cliente", "user", "patient", "paciente"].includes(senderBruto)) {
+    return "client";
+  }
+
+  if (["bot", "assistant", "system", "sofia"].includes(senderBruto)) {
+    return "bot";
+  }
+
+  const direction = String(mensagem?.direction ?? "").trim().toLowerCase();
+  if (["incoming", "inbound", "received"].includes(direction)) {
+    return "client";
+  }
+  if (["outgoing", "outbound", "sent"].includes(direction)) {
+    return "bot";
+  }
+
+  if (mensagem?.fromMe === true) return "bot";
+  if (mensagem?.fromMe === false) return "client";
+  if (mensagem?.isFromUser === true) return "client";
+  if (mensagem?.isFromUser === false) return "bot";
+
+  const status = String(mensagem?.status_envio ?? "").trim().toLowerCase();
+  if (status === "recebido") return "client";
+  if (["enviado", "sent", "delivered", "entregue", "read", "lido", "erro", "falhou"].includes(status)) {
+    return "bot";
+  }
+
+  return "bot";
+}
+
+function normalizarMensagem(mensagem) {
+  const senderType = normalizarSenderType(mensagem);
+  return {
+    ...mensagem,
+    senderType,
+  };
 }
 
 function isImagem(attachment) {
@@ -208,7 +252,7 @@ export default function Conversas() {
     setLoadingChat(true);
     try {
       const res = await api.get(`/api/conversas/${encodeURIComponent(contato.telefone)}`);
-      setMensagens(res.data.mensagens || []);
+      setMensagens((res.data.mensagens || []).map(normalizarMensagem));
     } catch {
       setMensagens([]);
     } finally {
@@ -305,7 +349,7 @@ export default function Conversas() {
               {!loadingChat && !mensagens.length && <p style={s.sideInfo}>Nenhuma mensagem encontrada.</p>}
 
               {mensagens.map((mensagem) => {
-                const bot = isSaida(mensagem);
+                const bot = mensagem.senderType === "bot";
                 return (
                   <div
                     key={mensagem.id}
