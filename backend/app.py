@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
 BACKEND_ASSETS = BASE_DIR / "backend" / "assets"
+FRONTEND_ASSETS = FRONTEND_DIST / "assets"
 
 app = Flask(__name__)
 
@@ -185,10 +186,16 @@ def serve_index():
 
 @app.get("/assets/<path:filename>")
 def serve_asset(filename):
+    if FRONTEND_ASSETS.exists():
+        arquivo_front = FRONTEND_ASSETS / filename
+        if arquivo_front.exists() and arquivo_front.is_file():
+            return send_from_directory(FRONTEND_ASSETS, filename)
+
     if BACKEND_ASSETS.exists():
-        arquivo = BACKEND_ASSETS / filename
-        if arquivo.exists() and arquivo.is_file():
+        arquivo_back = BACKEND_ASSETS / filename
+        if arquivo_back.exists() and arquivo_back.is_file():
             return send_from_directory(BACKEND_ASSETS, filename)
+
     return jsonify({"erro": "Arquivo não encontrado"}), 404
 
 
