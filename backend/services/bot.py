@@ -29,7 +29,7 @@ from utils.helpers import data_valida, formatar_data_br, formatar_data_iso
 import logging
 logger = logging.getLogger(__name__)
 
-_SAUDACOES = {"menu", "oi", "olá", "ola", "bom dia", "boa tarde", "boa noite", "obg"}
+_SAUDACOES = {"oi", "olá", "ola", "bom dia", "boa tarde", "boa noite"}
 
 _MENU = (
     "Olá! Seja bem-vindo ao consultório do nutricionista Paulo Jordão. 💪\n\n"
@@ -77,6 +77,25 @@ _PRE_CONSULTA = (
 )
 
 
+def _enviar_boas_vindas(telefone: str) -> None:
+    set_estado(telefone, "boas_vindas")
+    try:
+        send_whatsapp_message(telefone, _BOAS_VINDAS)
+    except Exception:
+        logger.exception("Erro ao enviar mensagem de boas-vindas")
+
+    if PDF_PLANOS_URL:
+        try:
+            send_whatsapp_document(
+                telefone,
+                PDF_PLANOS_URL,
+                "Planos_2026.pdf",
+                "Confira nossos planos 👆",
+            )
+        except Exception:
+            logger.exception("Erro ao enviar PDF dos planos")
+
+
 def _nome_dia(data_iso: str) -> str:
     try:
         dt = datetime.strptime(data_iso, "%Y-%m-%d")
@@ -99,6 +118,13 @@ def _hoje_nome() -> str:
 
 def _handle_boas_vindas(telefone: str, mensagem: str, dados: dict) -> BotResponse:
     """Estado após a saudação inicial. Usa Gemini para detectar intenção."""
+
+    if mensagem in _SAUDACOES:
+        set_estado(telefone, "boas_vindas", dados)
+        return BotResponse(texto=(
+            "Olá! 😊\n\n"
+            "Você gostaria de agendar uma consulta ou tem alguma dúvida sobre os planos e serviços?"
+        ))
 
     # Agradecimento/encerramento — responde e mantém no estado
     if mensagem in _AGRADECIMENTOS:
@@ -131,7 +157,8 @@ def _handle_boas_vindas(telefone: str, mensagem: str, dados: dict) -> BotRespons
 
 
 def _handle_menu(telefone: str, mensagem: str, dados: dict) -> BotResponse:
-    if mensagem == "1":
+    msg = mensagem.strip().lower()
+    if msg in {"1", "agendar", "marcar"} or detectar_intencao(msg) == "agendar":
         planos = buscar_planos_ativos()
         set_estado(telefone, "plano", {"planos": [p["codigo"] for p in planos]})
 
@@ -170,7 +197,7 @@ def _handle_menu(telefone: str, mensagem: str, dados: dict) -> BotResponse:
             lista_secoes=secoes,
         )
 
-    if mensagem == "2":
+    if msg == "2" or "cancel" in msg:
         cancelada = cancelar_consulta(telefone)
         set_estado(telefone, "menu")
         return BotResponse(texto=(
@@ -431,8 +458,11 @@ def _handle_sexo(telefone: str, mensagem: str, dados: dict) -> BotResponse:
 
 def _handle_confirmacao(telefone: str, mensagem: str, dados: dict) -> BotResponse:
     if mensagem == "2":
-        set_estado(telefone, "menu")
-        return BotResponse(texto="Agendamento cancelado. Digite 1 para agendar ou 2 para cancelar consulta.")
+        set_estado(telefone, "boas_vindas")
+        return BotResponse(texto=(
+            "Agendamento cancelado.\n\n"
+            "Se quiser, posso te ajudar com outra data ou tirar alguma dúvida. 😊"
+        ))
 
     if mensagem != "1":
         return BotResponse(
@@ -622,26 +652,13 @@ def processar_mensagem(telefone: str, mensagem: str) -> BotResponse:
     mensagem = mensagem.strip().lower()
     estado, dados = get_estado(telefone)
 
-    if mensagem in _SAUDACOES or estado == "inicio":
-        set_estado(telefone, "boas_vindas")
-        # 1) Envia a mensagem de boas-vindas primeiro
-        try:
-            send_whatsapp_message(telefone, _BOAS_VINDAS)
-        except Exception:
-            logger.exception("Erro ao enviar mensagem de boas-vindas")
-        # 2) Envia o PDF logo em seguida
-        if PDF_PLANOS_URL:
-            try:
-                send_whatsapp_document(
-                    telefone,
-                    PDF_PLANOS_URL,
-                    "Planos_2026.pdf",
-                    "Confira nossos planos 👆",
-                )
-            except Exception:
-                logger.exception("Erro ao enviar PDF dos planos")
-        # Retorna BotResponse vazio — dispatcher não reenvia nada
+    if estado == "inicio":
+        _enviar_boas_vindas(telefone)
         return BotResponse(texto="")
+
+    if mensagem == "menu":
+        set_estado(telefone, "menu")
+        return BotResponse(texto=_MENU)
 
     handler = _HANDLERS.get(estado)
     if handler is None:
