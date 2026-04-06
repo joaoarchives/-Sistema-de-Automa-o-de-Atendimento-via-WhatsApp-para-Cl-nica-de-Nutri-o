@@ -168,7 +168,7 @@ def responder_livre(mensagem: str) -> str:
             contents=mensagem,
             config=types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
-                max_output_tokens=300,
+                max_output_tokens=600,
                 temperature=0.7,
             ),
         )
