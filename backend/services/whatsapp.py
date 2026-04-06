@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 
 import requests
 
@@ -12,6 +13,11 @@ WHATSAPP_API_VERSION = os.getenv("WHATSAPP_API_VERSION", "v23.0")
 PIX_CHAVE = os.getenv("PIX_CHAVE", "")
 CARTAO_LINK = os.getenv("CARTAO_LINK", "")
 PDF_PLANOS_URL = os.getenv("PDF_PLANOS_URL", "")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+PDF_PLANOS_PATH = BASE_DIR / "assets" / "Planos 2026.pdf"
 
 _PLACEHOLDER_TOKENS = {"", "token_meta", "seu_token_aqui", "teste", "dummy"}
 _PLACEHOLDER_PHONE_IDS = {"", "id_meta", "seu_id_aqui", "teste", "dummy"}
@@ -37,6 +43,22 @@ def _is_configured() -> bool:
         (WHATSAPP_TOKEN or "").strip() not in _PLACEHOLDER_TOKENS
         and (WHATSAPP_PHONE_NUMBER_ID or "").strip() not in _PLACEHOLDER_PHONE_IDS
     )
+
+
+def get_pdf_planos_url() -> str:
+    if PDF_PLANOS_URL:
+        return PDF_PLANOS_URL
+
+    if not PDF_PLANOS_PATH.exists():
+        return ""
+
+    if PUBLIC_BASE_URL:
+        return f"{PUBLIC_BASE_URL}/assets/Planos%202026.pdf"
+
+    if RAILWAY_PUBLIC_DOMAIN:
+        return f"https://{RAILWAY_PUBLIC_DOMAIN}/assets/Planos%202026.pdf"
+
+    return ""
 
 
 def _fake_response(payload: dict) -> dict:

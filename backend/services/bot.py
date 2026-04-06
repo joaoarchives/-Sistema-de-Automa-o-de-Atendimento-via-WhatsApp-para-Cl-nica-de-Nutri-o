@@ -23,7 +23,7 @@ from services.agendamento_service import (
     confirmar_agendamento,
 )
 from services.gemini import interpretar_data, responder_livre, detectar_intencao
-from services.whatsapp import PDF_PLANOS_URL, send_pagamento_instrucoes, send_whatsapp_document, send_whatsapp_message
+from services.whatsapp import get_pdf_planos_url, send_pagamento_instrucoes, send_whatsapp_document, send_whatsapp_message
 from utils.helpers import data_valida, formatar_data_br, formatar_data_iso
 
 import logging
@@ -84,11 +84,12 @@ def _enviar_boas_vindas(telefone: str) -> None:
     except Exception:
         logger.exception("Erro ao enviar mensagem de boas-vindas")
 
-    if PDF_PLANOS_URL:
+    pdf_planos_url = get_pdf_planos_url()
+    if pdf_planos_url:
         try:
             send_whatsapp_document(
                 telefone,
-                PDF_PLANOS_URL,
+                pdf_planos_url,
                 "Planos_2026.pdf",
                 "Confira nossos planos 👆",
             )

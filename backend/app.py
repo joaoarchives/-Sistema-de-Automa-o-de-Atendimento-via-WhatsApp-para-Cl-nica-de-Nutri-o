@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 FRONTEND_DIST = BASE_DIR / "frontend" / "dist"
+BACKEND_ASSETS = BASE_DIR / "backend" / "assets"
 
 app = Flask(__name__)
 
@@ -180,6 +181,15 @@ def serve_index():
         "status": "backend-online",
         "frontend": "build não encontrado"
     }), 200
+
+
+@app.get("/assets/<path:filename>")
+def serve_asset(filename):
+    if BACKEND_ASSETS.exists():
+        arquivo = BACKEND_ASSETS / filename
+        if arquivo.exists() and arquivo.is_file():
+            return send_from_directory(BACKEND_ASSETS, filename)
+    return jsonify({"erro": "Arquivo não encontrado"}), 404
 
 
 @app.get("/<path:path>")
