@@ -13,6 +13,7 @@ IA                 → services/gemini.py
 from datetime import date, datetime
 
 from services.bot_response import BotResponse
+from database.mensagens import salvar_log_whatsapp
 from database.clientes import registrar_cliente_se_nao_existir
 from database.consultas import buscar_periodo_do_dia, buscar_planos_ativos, buscar_plano_por_codigo
 from database.estados import get_estado, set_estado
@@ -83,11 +84,19 @@ def _enviar_boas_vindas(telefone: str) -> None:
     pdf_planos_url = get_pdf_planos_url()
     if pdf_planos_url:
         try:
-            send_whatsapp_document(
+            resultado = send_whatsapp_document(
                 telefone,
                 pdf_planos_url,
                 "Planos_2026.pdf",
                 "Confira nossos planos 👆",
+            )
+            salvar_log_whatsapp(
+                telefone_destino=telefone,
+                tipo_mensagem="document",
+                message_id=resultado.get("response", {}).get("messages", [{}])[0].get("id"),
+                status_envio="enviado",
+                payload=resultado.get("payload", {}),
+                resposta_api=resultado.get("response", {}),
             )
         except Exception:
             logger.exception("Erro ao enviar PDF dos planos")

@@ -36,14 +36,154 @@ function inicial(contato) {
 }
 
 function isSaida(mensagem) {
-  return Boolean(mensagem.status_envio);
+  return mensagem.sender ? mensagem.sender === "bot" : Boolean(mensagem.status_envio);
 }
 
+function isImagem(attachment) {
+  return attachment?.fileType === "image" || attachment?.mimeType?.startsWith("image/");
+}
+
+function formatarTamanho(size) {
+  if (!size || Number.isNaN(Number(size))) return null;
+  const bytes = Number(size);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function extensaoArquivo(attachment) {
+  const nome = attachment?.fileName || "";
+  const match = nome.match(/\.([a-z0-9]+)$/i);
+  return (match?.[1] || attachment?.fileType || "arquivo").toUpperCase();
+}
+
+function isUrlProtegida(url) {
+  return String(url || "").startsWith("/api/");
+}
+
+function temTextoRelevante(mensagem) {
+  if (!mensagem?.texto) return false;
+  if (!mensagem.attachments?.length) return true;
+
+  const texto = String(mensagem.texto).trim();
+  const primeiroNome = mensagem.attachments[0]?.fileName;
+  if (!texto) return false;
+  if (texto === mensagem.tipo_mensagem) return false;
+  if (primeiroNome && texto === primeiroNome) return false;
+  return true;
+}
+
+function AnexoImagem({ attachment, onOpen }) {
+  const [src, setSrc] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro] = useState("");
+
+  useEffect(() => {
+    let ativo = true;
+    let objectUrl = "";
+
+    async function carregar() {
+      setLoading(true);
+      setErro("");
+      try {
+        if (!isUrlProtegida(attachment.fileUrl)) {
+          if (ativo) setSrc(attachment.fileUrl);
+          return;
+        }
+
+        const res = await api.get(attachment.fileUrl, { responseType: "blob" });
+        objectUrl = URL.createObjectURL(res.data);
+        if (ativo) setSrc(objectUrl);
+      } catch {
+        if (ativo) setErro("Erro ao carregar imagem");
+      } finally {
+        if (ativo) setLoading(false);
+      }
+    }
+
+    carregar();
+    return () => {
+      ativo = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [attachment.fileUrl]);
+
+  if (loading) return <div style={s.imageLoading}>Carregando imagem...</div>;
+  if (erro) return <div style={s.attachmentError}>{erro}</div>;
+
+  return (
+    <button type="button" onClick={() => onOpen(src, attachment.fileName)} style={s.imageButton}>
+      <img src={src} alt={attachment.fileName} style={s.imagePreview} />
+    </button>
+  );
+}
+
+function AnexoArquivo({ attachment }) {
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
+
+  async function abrirOuBaixar(download = false) {
+    setLoading(true);
+    setErro("");
+    try {
+      if (!isUrlProtegida(attachment.fileUrl)) {
+        if (download) {
+          const link = document.createElement("a");
+          link.href = attachment.fileUrl;
+          link.download = attachment.fileName || "arquivo";
+          link.click();
+        } else {
+          window.open(attachment.fileUrl, "_blank", "noopener,noreferrer");
+        }
+        return;
+      }
+
+      const res = await api.get(attachment.fileUrl, { responseType: "blob" });
+      const objectUrl = URL.createObjectURL(res.data);
+      if (download) {
+        const link = document.createElement("a");
+        link.href = objectUrl;
+        link.download = attachment.fileName || "arquivo";
+        link.click();
+      } else {
+        window.open(objectUrl, "_blank", "noopener,noreferrer");
+      }
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+    } catch {
+      setErro("Erro ao carregar anexo");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={s.fileCard}>
+      <div style={s.fileBadge}>{extensaoArquivo(attachment)}</div>
+      <div style={s.fileBody}>
+        <div style={s.fileName}>{attachment.fileName || "Arquivo"}</div>
+        <div style={s.fileMeta}>
+          {attachment.mimeType || attachment.fileType}
+          {formatarTamanho(attachment.size) ? ` - ${formatarTamanho(attachment.size)}` : ""}
+        </div>
+        <div style={s.fileActions}>
+          <button type="button" onClick={() => abrirOuBaixar(false)} style={s.fileActionBtn} disabled={loading}>
+            Abrir
+          </button>
+          <button type="button" onClick={() => abrirOuBaixar(true)} style={s.fileActionBtn} disabled={loading}>
+            Baixar
+          </button>
+        </div>
+        {erro && <div style={s.attachmentError}>{erro}</div>}
+      </div>
+    </div>
+  );
+}
 export default function Conversas() {
   const [conversas, setConversas] = useState([]);
   const [selecionado, setSelecionado] = useState(null);
   const [mensagens, setMensagens] = useState([]);
   const [busca, setBusca] = useState("");
+  const [imagemAberta, setImagemAberta] = useState(null);
   const [loadingLista, setLoadingLista] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
   const [erro, setErro] = useState("");
@@ -176,9 +316,24 @@ export default function Conversas() {
                   >
                     <div style={{ ...s.bubble, ...(bot ? s.bubbleBot : s.bubbleCliente) }}>
                       {bot && <div style={s.label}>Sofia</div>}
-                      <div style={s.text}>{mensagem.texto}</div>
+                      {mensagem.attachments?.length > 0 && (
+                        <div style={s.attachmentsWrap}>
+                          {mensagem.attachments.map((attachment) =>
+                            isImagem(attachment) ? (
+                              <AnexoImagem
+                                key={attachment.id}
+                                attachment={attachment}
+                                onOpen={(src, nome) => setImagemAberta({ src, nome })}
+                              />
+                            ) : (
+                              <AnexoArquivo key={attachment.id} attachment={attachment} />
+                            ),
+                          )}
+                        </div>
+                      )}
+                      {temTextoRelevante(mensagem) && <div style={s.text}>{mensagem.texto}</div>}
                       <div style={s.meta}>
-                        <span>{formatarHora(mensagem.criado_em)}</span>
+                        <span>{formatarHora(mensagem.timestamp || mensagem.criado_em)}</span>
                         {bot && iconeStatus(mensagem.status_envio)}
                       </div>
                     </div>
@@ -189,6 +344,20 @@ export default function Conversas() {
           </>
         )}
       </section>
+
+      {imagemAberta && (
+        <div style={s.modalOverlay} onClick={() => setImagemAberta(null)}>
+          <div style={s.modalCard} onClick={(e) => e.stopPropagation()}>
+            <img src={imagemAberta.src} alt={imagemAberta.nome} style={s.modalImage} />
+            <div style={s.modalFooter}>
+              <span style={s.modalName}>{imagemAberta.nome}</span>
+              <button type="button" onClick={() => setImagemAberta(null)} style={s.modalClose}>
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -416,6 +585,94 @@ const s = {
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
   },
+  attachmentsWrap: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    marginBottom: 8,
+  },
+  imageButton: {
+    background: "transparent",
+    border: "none",
+    padding: 0,
+    cursor: "pointer",
+  },
+  imagePreview: {
+    display: "block",
+    width: "100%",
+    maxWidth: 320,
+    maxHeight: 240,
+    objectFit: "cover",
+    borderRadius: 12,
+  },
+  imageLoading: {
+    minWidth: 180,
+    minHeight: 120,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    color: "#cbd5e1",
+    fontSize: 12,
+  },
+  fileCard: {
+    display: "flex",
+    gap: 10,
+    padding: 10,
+    background: "rgba(255,255,255,0.08)",
+    borderRadius: 12,
+    minWidth: 220,
+  },
+  fileBadge: {
+    width: 48,
+    height: 48,
+    borderRadius: 10,
+    background: "rgba(15,23,42,0.35)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: 12,
+    fontWeight: 700,
+    color: "#bfdbfe",
+    flexShrink: 0,
+  },
+  fileBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  fileName: {
+    fontSize: 13,
+    fontWeight: 700,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  fileMeta: {
+    marginTop: 4,
+    fontSize: 11,
+    color: "rgba(233,237,239,0.72)",
+    wordBreak: "break-word",
+  },
+  fileActions: {
+    display: "flex",
+    gap: 8,
+    marginTop: 8,
+  },
+  fileActionBtn: {
+    border: "none",
+    borderRadius: 8,
+    padding: "6px 10px",
+    background: "rgba(15,23,42,0.42)",
+    color: "#e2e8f0",
+    fontSize: 12,
+    cursor: "pointer",
+  },
+  attachmentError: {
+    marginTop: 6,
+    fontSize: 11,
+    color: "#fecaca",
+  },
   meta: {
     marginTop: 8,
     display: "flex",
@@ -424,5 +681,49 @@ const s = {
     gap: 6,
     fontSize: 11,
     color: "rgba(233,237,239,0.72)",
+  },
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(0,0,0,0.75)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
+    zIndex: 50,
+  },
+  modalCard: {
+    maxWidth: "min(92vw, 1000px)",
+    maxHeight: "90vh",
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+  },
+  modalImage: {
+    maxWidth: "100%",
+    maxHeight: "calc(90vh - 56px)",
+    objectFit: "contain",
+    borderRadius: 14,
+  },
+  modalFooter: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+    color: "#e5edf6",
+  },
+  modalName: {
+    fontSize: 13,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  modalClose: {
+    border: "none",
+    borderRadius: 8,
+    padding: "8px 12px",
+    background: "#1f2937",
+    color: "#fff",
+    cursor: "pointer",
   },
 };

@@ -1,6 +1,7 @@
 import logging
 import os
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 
@@ -48,6 +49,12 @@ def _headers() -> dict:
     }
 
 
+def _auth_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+    }
+
+
 def _is_configured() -> bool:
     return (
         (WHATSAPP_TOKEN or "").strip() not in _PLACEHOLDER_TOKENS
@@ -91,6 +98,48 @@ def _post_whatsapp(payload: dict, erro_prefixo: str) -> dict:
     if not response.ok:
         raise RuntimeError(f"{erro_prefixo}: {response.status_code} - {response.text}")
     return {"payload": payload, "response": response_json}
+
+
+def get_whatsapp_media_metadata(media_id: str) -> dict:
+    if not _is_configured():
+        raise RuntimeError("WhatsApp não configurado para consultar mídia.")
+
+    response = requests.get(
+        f"https://graph.facebook.com/{WHATSAPP_API_VERSION}/{media_id}",
+        headers=_auth_headers(),
+        timeout=30,
+    )
+    response_json = response.json()
+    if not response.ok:
+        raise RuntimeError(f"Erro ao consultar mídia: {response.status_code} - {response.text}")
+    return response_json
+
+
+def download_whatsapp_media(media_id: str) -> dict:
+    metadata = get_whatsapp_media_metadata(media_id)
+    media_url = metadata.get("url")
+    if not media_url:
+        raise RuntimeError("Mídia sem URL de download.")
+
+    response = requests.get(
+        media_url,
+        headers=_auth_headers(),
+        timeout=60,
+    )
+    if not response.ok:
+        raise RuntimeError(f"Erro ao baixar mídia: {response.status_code} - {response.text}")
+
+    mime_type = response.headers.get("Content-Type") or metadata.get("mime_type") or "application/octet-stream"
+    filename = metadata.get("filename") or f"{media_id}"
+    disposition = response.headers.get("Content-Disposition", "")
+    if "filename=" in disposition and not metadata.get("filename"):
+        filename = disposition.split("filename=", 1)[1].strip().strip('"')
+
+    return {
+        "content": response.content,
+        "mime_type": mime_type,
+        "filename": quote(filename),
+    }
 
 
 def send_whatsapp_message(telefone: str, mensagem: str) -> dict:

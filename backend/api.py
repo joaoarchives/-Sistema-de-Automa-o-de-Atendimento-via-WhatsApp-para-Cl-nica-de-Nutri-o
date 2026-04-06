@@ -1,9 +1,10 @@
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, Response, request, jsonify
 from functools import wraps
 from datetime import datetime, timedelta, date, time
 import json
 import jwt
 import os
+from pathlib import Path
 
 from database.consultas import (
     get_consultas_hoje,
@@ -44,6 +45,9 @@ def extrair_texto_payload(payload, fallback=""):
     raw = (
         payload.get("text")
         or payload.get("body")
+        or (payload.get("image", {}) or {}).get("caption")
+        or (payload.get("document", {}) or {}).get("caption")
+        or (payload.get("document", {}) or {}).get("filename")
         or (payload.get("template", {}) or {}).get("name")
     )
     if isinstance(raw, str):
@@ -53,6 +57,62 @@ def extrair_texto_payload(payload, fallback=""):
     if raw is not None:
         return str(raw)
     return fallback
+
+
+def inferir_sender(status_envio: str | None) -> str:
+    return "client" if status_envio == "recebido" else "bot"
+
+
+def inferir_file_type(file_name: str, mime_type: str | None, fallback: str) -> str:
+    if mime_type and mime_type.startswith("image/"):
+        return "image"
+
+    extensao = Path(file_name or "").suffix.lower().lstrip(".")
+    if extensao:
+        return extensao
+
+    if mime_type and "/" in mime_type:
+        return mime_type.split("/", 1)[1].lower()
+
+    return fallback
+
+
+def extrair_anexos_payload(payload):
+    if not isinstance(payload, dict):
+        return []
+
+    anexos = []
+    msg_type = payload.get("type")
+
+    if msg_type == "image":
+        image = payload.get("image", {}) or {}
+        media_id = image.get("id")
+        mime_type = image.get("mime_type")
+        file_name = image.get("filename") or f"imagem-{media_id or 'whatsapp'}.jpg"
+        anexos.append({
+            "id": media_id or file_name,
+            "fileName": file_name,
+            "fileType": inferir_file_type(file_name, mime_type, "image"),
+            "fileUrl": f"/api/conversas/media/{media_id}" if media_id else image.get("link"),
+            "mimeType": mime_type,
+            "size": image.get("file_size") or image.get("size"),
+        })
+
+    if msg_type == "document":
+        document = payload.get("document", {}) or {}
+        media_id = document.get("id")
+        mime_type = document.get("mime_type")
+        file_name = document.get("filename") or f"arquivo-{media_id or 'whatsapp'}"
+        anexos.append({
+            "id": media_id or file_name,
+            "fileName": file_name,
+            "fileType": inferir_file_type(file_name, mime_type, "document"),
+            "fileUrl": document.get("link") or (f"/api/conversas/media/{media_id}" if media_id else None),
+            "mimeType": mime_type,
+            "size": document.get("file_size") or document.get("size"),
+        })
+
+    return [anexo for anexo in anexos if anexo.get("fileUrl")]
 
 def token_required(f):
     @wraps(f)
@@ -284,6 +344,20 @@ def listar_planos():
 
 # ── Conversas (histórico WhatsApp) ───────────────────────────────────────────
 
+@api.route("/conversas/media/<media_id>", methods=["GET"])
+@token_required
+def obter_midia_conversa(media_id):
+    from services.whatsapp import download_whatsapp_media
+
+    try:
+        media = download_whatsapp_media(media_id)
+        response = Response(media["content"], mimetype=media["mime_type"])
+        response.headers["Content-Disposition"] = f'inline; filename="{media["filename"]}"'
+        return response
+    except Exception as exc:
+        return jsonify({"erro": f"Não foi possível carregar a mídia: {exc}"}), 502
+
+
 @api.route("/conversas", methods=["GET"])
 @token_required
 def listar_conversas():
@@ -340,11 +414,14 @@ def mensagens_por_telefone(telefone):
         mensagens.append({
             "id":            r["id"],
             "consulta_id":   r["consulta_id"],
+            "sender":        inferir_sender(r["status_envio"]),
             "tipo_mensagem": r["tipo_mensagem"],
             "message_id":    r["message_id"],
             "status_envio":  r["status_envio"],
             "texto":         extrair_texto_payload(payload, texto or r["tipo_mensagem"]),
+            "attachments":   extrair_anexos_payload(payload),
             "payload":       payload,
+            "timestamp":     r["criado_em"].isoformat() if r["criado_em"] else None,
             "criado_em":     r["criado_em"].isoformat() if r["criado_em"] else None,
         })
     return jsonify({

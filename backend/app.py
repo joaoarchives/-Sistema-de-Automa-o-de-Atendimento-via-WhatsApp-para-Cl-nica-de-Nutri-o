@@ -82,6 +82,14 @@ def receive_webhook():
 
                     # Comprovante de pagamento (imagem ou PDF enviado pelo cliente)
                     if msg_type in {"image","document"}:
+                        salvar_log_whatsapp(
+                            telefone_destino=from_number,
+                            tipo_mensagem=msg_type,
+                            message_id=msg_id,
+                            status_envio="recebido",
+                            payload=message,
+                            resposta_api={},
+                        )
                         estado_str, _ = get_estado(from_number)
                         if estado_str == "aguardando_comprovante":
                             resposta = processar_comprovante(from_number)
@@ -113,6 +121,15 @@ def receive_webhook():
 
                     if not (from_number and texto):
                         continue
+
+                    salvar_log_whatsapp(
+                        telefone_destino=from_number,
+                        tipo_mensagem=msg_type,
+                        message_id=msg_id,
+                        status_envio="recebido",
+                        payload=message,
+                        resposta_api={},
+                    )
 
                     resposta = processar_mensagem(from_number, texto)
 
