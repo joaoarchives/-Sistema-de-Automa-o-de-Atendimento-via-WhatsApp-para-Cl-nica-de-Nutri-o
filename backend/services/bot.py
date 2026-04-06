@@ -23,7 +23,13 @@ from services.agendamento_service import (
     confirmar_agendamento,
 )
 from services.gemini import interpretar_data, responder_livre, detectar_intencao
-from services.whatsapp import get_pdf_planos_url, send_pagamento_instrucoes, send_whatsapp_document, send_whatsapp_message
+from services.whatsapp import (
+    get_pdf_planos_url,
+    send_localizacao_clinica,
+    send_pagamento_instrucoes,
+    send_whatsapp_document,
+    send_whatsapp_message,
+)
 from utils.helpers import data_valida, formatar_data_br, formatar_data_iso
 
 import logging
@@ -66,16 +72,6 @@ _PERIODO_LABEL = {
     "manha": "manhã (09:00 às 12:00)",
     "tarde": "tarde (16:00 às 19:00)",
 }
-
-_PRE_CONSULTA = (
-    "Recomendações pré-consulta do Dr. Paulo:\n\n"
-    "Use roupas adequadas para avaliação física.\n"
-    "Homens: sunga ou calção.\n"
-    "Mulheres: biquíni ou short e top.\n\n"
-    "Aguardando a confirmação do pagamento pelo Dr. Paulo. "
-    "Em breve você receberá a confirmação. 🙏"
-)
-
 
 def _enviar_boas_vindas(telefone: str) -> None:
     set_estado(telefone, "boas_vindas")
@@ -497,10 +493,11 @@ def _handle_confirmacao(telefone: str, mensagem: str, dados: dict) -> BotRespons
     valor_adiant = dados.get("plano_adiant", 0.0)
     try:
         send_pagamento_instrucoes(telefone, valor_adiant)
+        send_localizacao_clinica(telefone)
     except Exception:
-        logger.exception("Erro ao enviar instruções de pagamento — telefone=%s", telefone)
+        logger.exception("Erro ao enviar instruções finais do agendamento — telefone=%s", telefone)
 
-    return BotResponse(texto=_PRE_CONSULTA)
+    return BotResponse(texto="")
 
 
 def _handle_aguardando_comprovante(telefone: str, mensagem: str, dados: dict) -> BotResponse:

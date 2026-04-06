@@ -199,7 +199,7 @@ def confirmar_pagamento(consulta_id):
     """
     from database.consultas import atualizar_status_consulta
     from database.connection import get_db
-    from services.whatsapp import send_whatsapp_message
+    from services.whatsapp import send_recomendacoes_pre_consulta, send_whatsapp_message
 
     sucesso = atualizar_status_consulta(consulta_id, "confirmado")
     if not sucesso:
@@ -226,6 +226,7 @@ def confirmar_pagamento(consulta_id):
                 f"Sua consulta está agendada para {data_fmt} às {horario_fmt}.\n\n"
                 f"Qualquer dúvida, estamos à disposição. Até lá! 💪"
             )
+            send_recomendacoes_pre_consulta(row["telefone"])
             # Atualiza estado do cliente para consulta_confirmada
             try:
                 from database.estados import set_estado, get_estado

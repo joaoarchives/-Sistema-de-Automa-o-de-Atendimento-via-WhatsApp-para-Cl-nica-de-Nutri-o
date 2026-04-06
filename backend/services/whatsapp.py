@@ -16,6 +16,16 @@ PDF_PLANOS_URL = os.getenv("PDF_PLANOS_URL", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
 RAILWAY_PUBLIC_DOMAIN = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
 
+CLINICA_MAPS_URL = (
+    "https://www.google.com/maps/search/"
+    "Rua+da+Contagem,+1985,+Paracatu+MG,+38603-400,+Brasil,+1%C2%BA+andar,+sala+113."
+    "/@-17.238,-46.8925,17z?hl=pt-BR&entry=ttu&g_ep=EgoyMDI2MDQwMS4wIKXMDSoASAFQAw%3D%3D"
+)
+CLINICA_ENDERECO = (
+    "Rua da Contagem, 1985, Paracatu MG, 38603-400, Brasil\n"
+    "1º andar, sala 113."
+)
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 PDF_PLANOS_PATH = BASE_DIR / "assets" / "Planos 2026.pdf"
 
@@ -140,5 +150,22 @@ def send_pagamento_instrucoes(telefone: str, valor: float) -> dict:
         f"Chave PIX: {PIX_CHAVE}\n\n"
         f"Crédito em até 6x: {CARTAO_LINK}\n\n"
         f"Após o pagamento, envie o comprovante aqui nesta conversa."
+    )
+    return send_whatsapp_message(telefone, mensagem)
+
+
+def send_localizacao_clinica(telefone: str) -> dict:
+    mensagem = (
+        "Localização da clínica:\n\n"
+        f"{CLINICA_ENDERECO}\n\n"
+        f"{CLINICA_MAPS_URL}"
+    )
+    return send_whatsapp_message(telefone, mensagem)
+def send_recomendacoes_pre_consulta(telefone: str) -> dict:
+    mensagem = (
+        "Recomendações pré-consulta do Dr. Paulo:\n\n"
+        "Use roupas adequadas para avaliação física.\n"
+        "Homens: sunga ou calção.\n"
+        "Mulheres: biquíni ou short e top."
     )
     return send_whatsapp_message(telefone, mensagem)
