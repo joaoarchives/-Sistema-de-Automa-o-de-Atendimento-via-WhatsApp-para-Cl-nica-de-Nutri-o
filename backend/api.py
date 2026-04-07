@@ -47,9 +47,22 @@ def extrair_texto_payload(payload, fallback=""):
     if not payload:
         return fallback
 
+    interactive = payload.get("interactive", {}) or {}
+    list_reply = interactive.get("list_reply", {}) or {}
+    button_reply = interactive.get("button_reply", {}) or {}
+    interactive_body = interactive.get("body", {}) or {}
+    interactive_action = interactive.get("action", {}) or {}
+
     raw = (
         payload.get("text")
         or payload.get("body")
+        or list_reply.get("title")
+        or list_reply.get("description")
+        or list_reply.get("id")
+        or button_reply.get("title")
+        or button_reply.get("id")
+        or interactive_body.get("text")
+        or interactive_action.get("button")
         or (payload.get("image", {}) or {}).get("caption")
         or (payload.get("document", {}) or {}).get("caption")
         or (payload.get("document", {}) or {}).get("filename")
@@ -423,6 +436,7 @@ def listar_conversas():
             "ultima_mensagem": r["ultima_mensagem"].isoformat() if r["ultima_mensagem"] else None,
             "total_mensagens": r["total_mensagens"],
             "ultimo_tipo":     r["ultimo_tipo"],
+            "ultimo_payload":  ultimo_payload,
             "ultima_previa":   extrair_texto_payload(ultimo_payload, r["ultimo_tipo"]),
         })
     return jsonify({"conversas": resultado})

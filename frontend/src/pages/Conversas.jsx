@@ -75,11 +75,133 @@ function normalizarSenderType(mensagem) {
   return "bot";
 }
 
+function isTextoTecnico(valor) {
+  const texto = String(valor || "").trim().toLowerCase();
+  return ["interactive", "lista", "list", "text", "texto"].includes(texto);
+}
+
+function extrairDisplayDoPayload(payload, fallbackMensagem = {}) {
+  if (!payload || typeof payload !== "object") {
+    return {
+      displayText: "",
+      displaySubtext: "",
+      messageKind: fallbackMensagem?.tipo_mensagem || "unknown",
+    };
+  }
+
+  const tipo = String(
+    payload.type ??
+    fallbackMensagem?.tipo_mensagem ??
+    fallbackMensagem?.messageType ??
+    "",
+  ).trim().toLowerCase();
+
+  const interactive = payload.interactive || {};
+  const listReply = interactive.list_reply || payload.list_reply || {};
+  const buttonReply = interactive.button_reply || payload.button_reply || payload.button || {};
+  const interactiveBody = interactive.body || {};
+  const interactiveAction = interactive.action || {};
+  const textNode = payload.text;
+  const imageNode = payload.image || {};
+  const documentNode = payload.document || {};
+
+  if (listReply.title || listReply.id || listReply.description) {
+    return {
+      displayText: listReply.title || listReply.id || "",
+      displaySubtext: listReply.description || "",
+      messageKind: "list_reply",
+    };
+  }
+
+  if (buttonReply.title || buttonReply.text || buttonReply.id) {
+    return {
+      displayText: buttonReply.title || buttonReply.text || buttonReply.id || "",
+      displaySubtext: "",
+      messageKind: "button_reply",
+    };
+  }
+
+  if (tipo === "interactive" || fallbackMensagem?.tipo_mensagem === "lista") {
+    return {
+      displayText: interactiveBody.text || payload.body?.text || payload.body || "",
+      displaySubtext: interactiveAction.button || "",
+      messageKind: interactive.type || "interactive",
+    };
+  }
+
+  if (typeof textNode === "string") {
+    return { displayText: textNode, displaySubtext: "", messageKind: "text" };
+  }
+
+  if (textNode?.body) {
+    return { displayText: textNode.body, displaySubtext: "", messageKind: "text" };
+  }
+
+  if (typeof payload.body === "string") {
+    return { displayText: payload.body, displaySubtext: "", messageKind: tipo || "text" };
+  }
+
+  if (payload.body?.text) {
+    return { displayText: payload.body.text, displaySubtext: "", messageKind: tipo || "text" };
+  }
+
+  if (imageNode.caption) {
+    return { displayText: imageNode.caption, displaySubtext: "", messageKind: "image" };
+  }
+
+  if (documentNode.caption || documentNode.filename) {
+    return {
+      displayText: documentNode.caption || documentNode.filename || "",
+      displaySubtext: "",
+      messageKind: "document",
+    };
+  }
+
+  return {
+    displayText: "",
+    displaySubtext: "",
+    messageKind: tipo || fallbackMensagem?.tipo_mensagem || "unknown",
+  };
+}
+
+function melhorFallbackTexto(mensagem, senderType) {
+  const bruto = String(mensagem?.texto || "").trim();
+  if (bruto && !isTextoTecnico(bruto)) {
+    return bruto;
+  }
+
+  if (mensagem?.attachments?.length) {
+    return "";
+  }
+
+  if (mensagem?.tipo_mensagem === "document") return "Documento enviado";
+  if (mensagem?.tipo_mensagem === "image") return "Imagem enviada";
+  if (mensagem?.tipo_mensagem === "lista" && senderType === "bot") return "Lista enviada";
+  if (mensagem?.tipo_mensagem === "interactive" && senderType === "client") return "Resposta interativa";
+  return "";
+}
+
 function normalizarMensagem(mensagem) {
   const senderType = normalizarSenderType(mensagem);
+  const { displayText, displaySubtext, messageKind } = extrairDisplayDoPayload(mensagem?.payload, mensagem);
+
   return {
     ...mensagem,
     senderType,
+    displayText: displayText || melhorFallbackTexto(mensagem, senderType),
+    displaySubtext: displaySubtext || "",
+    messageKind,
+  };
+}
+
+function normalizarConversa(contato) {
+  const display = extrairDisplayDoPayload(contato?.ultimo_payload, contato);
+  const previewText = display.displayText || (!isTextoTecnico(contato?.ultima_previa) ? contato?.ultima_previa : "");
+  const fallback = contato?.ultimo_tipo === "document" ? "Documento" : contato?.ultimo_tipo === "image" ? "Imagem" : "Sem mensagens";
+
+  return {
+    ...contato,
+    previewText: previewText || fallback,
   };
 }
 
@@ -106,15 +228,10 @@ function isUrlProtegida(url) {
 }
 
 function temTextoRelevante(mensagem) {
-  if (!mensagem?.texto) return false;
-  if (!mensagem.attachments?.length) return true;
-
-  const texto = String(mensagem.texto).trim();
-  const primeiroNome = mensagem.attachments[0]?.fileName;
-  if (!texto) return false;
-  if (texto === mensagem.tipo_mensagem) return false;
-  if (primeiroNome && texto === primeiroNome) return false;
-  return true;
+  const texto = String(mensagem?.displayText || "").trim();
+  const subtexto = String(mensagem?.displaySubtext || "").trim();
+  if (texto || subtexto) return true;
+  return false;
 }
 
 function AnexoImagem({ attachment, onOpen }) {
@@ -237,7 +354,7 @@ export default function Conversas() {
     setErro("");
     try {
       const res = await api.get("/api/conversas");
-      const lista = res.data.conversas || [];
+      const lista = (res.data.conversas || []).map(normalizarConversa);
       setConversas(lista);
       setSelecionado((atual) => atual || lista[0] || null);
     } catch {
@@ -274,7 +391,7 @@ export default function Conversas() {
     const termo = busca.trim().toLowerCase();
     if (!termo) return conversas;
     return conversas.filter((c) =>
-      [c.nome, c.telefone, c.ultima_previa, c.ultimo_tipo]
+      [c.nome, c.telefone, c.previewText, c.ultima_previa, c.ultimo_tipo]
         .filter(Boolean)
         .some((valor) => String(valor).toLowerCase().includes(termo)),
     );
@@ -318,7 +435,7 @@ export default function Conversas() {
                   <div style={s.contactPreview}>
                     <span style={s.contactPreviewIcon}>🗓️</span>
                     <span style={s.contactPreviewText}>
-                      {resumoTexto(contato.ultima_previa, contato.ultimo_tipo)}
+                      {resumoTexto(contato.previewText, contato.ultimo_tipo)}
                     </span>
                   </div>
                 </div>
@@ -375,7 +492,12 @@ export default function Conversas() {
                           )}
                         </div>
                       )}
-                      {temTextoRelevante(mensagem) && <div style={s.text}>{mensagem.texto}</div>}
+                      {temTextoRelevante(mensagem) && (
+                        <div>
+                          {mensagem.displayText && <div style={s.text}>{mensagem.displayText}</div>}
+                          {mensagem.displaySubtext && <div style={s.subtext}>{mensagem.displaySubtext}</div>}
+                        </div>
+                      )}
                       <div style={s.meta}>
                         <span>{formatarHora(mensagem.timestamp || mensagem.criado_em)}</span>
                         {bot && iconeStatus(mensagem.status_envio)}
@@ -626,6 +748,14 @@ const s = {
   text: {
     fontSize: 14,
     lineHeight: 1.45,
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  },
+  subtext: {
+    marginTop: 6,
+    fontSize: 12,
+    lineHeight: 1.35,
+    color: "rgba(233,237,239,0.72)",
     whiteSpace: "pre-wrap",
     wordBreak: "break-word",
   },
