@@ -74,10 +74,32 @@ _PERIODO_LABEL = {
     "tarde": "tarde (16:00 às 19:00)",
 }
 
+def _registrar_envio_whatsapp(telefone: str, resultado: dict, tipo_mensagem: str | None = None) -> None:
+    response_data = resultado.get("response", {}) if isinstance(resultado, dict) else {}
+    payload = resultado.get("payload", {}) if isinstance(resultado, dict) else {}
+    payload_type = payload.get("type")
+    tipo = tipo_mensagem or payload_type or "texto"
+
+    if tipo == "text":
+        tipo = "texto"
+    elif tipo == "interactive":
+        tipo = "lista"
+
+    salvar_log_whatsapp(
+        telefone_destino=telefone,
+        tipo_mensagem=tipo,
+        message_id=response_data.get("messages", [{}])[0].get("id"),
+        status_envio="erro" if not response_data.get("messages") else "enviado",
+        payload=payload,
+        resposta_api=response_data,
+    )
+
+
 def _enviar_boas_vindas(telefone: str) -> None:
     set_estado(telefone, "boas_vindas")
     try:
-        send_whatsapp_message(telefone, _BOAS_VINDAS)
+        resultado_texto = send_whatsapp_message(telefone, _BOAS_VINDAS)
+        _registrar_envio_whatsapp(telefone, resultado_texto, "texto")
     except Exception:
         logger.exception("Erro ao enviar mensagem de boas-vindas")
 
@@ -90,14 +112,7 @@ def _enviar_boas_vindas(telefone: str) -> None:
                 "Planos_2026.pdf",
                 "Confira nossos planos 👆",
             )
-            salvar_log_whatsapp(
-                telefone_destino=telefone,
-                tipo_mensagem="document",
-                message_id=resultado.get("response", {}).get("messages", [{}])[0].get("id"),
-                status_envio="enviado",
-                payload=resultado.get("payload", {}),
-                resposta_api=resultado.get("response", {}),
-            )
+            _registrar_envio_whatsapp(telefone, resultado, "document")
         except Exception:
             logger.exception("Erro ao enviar PDF dos planos")
 
@@ -501,8 +516,11 @@ def _handle_confirmacao(telefone: str, mensagem: str, dados: dict) -> BotRespons
 
     valor_adiant = dados.get("plano_adiant", 0.0)
     try:
-        send_pagamento_instrucoes(telefone, valor_adiant)
-        send_localizacao_clinica(telefone)
+        resultado_pagamento = send_pagamento_instrucoes(telefone, valor_adiant)
+        _registrar_envio_whatsapp(telefone, resultado_pagamento, "texto")
+
+        resultado_localizacao = send_localizacao_clinica(telefone)
+        _registrar_envio_whatsapp(telefone, resultado_localizacao, "texto")
     except Exception:
         logger.exception("Erro ao enviar instruções finais do agendamento — telefone=%s", telefone)
 
@@ -653,7 +671,8 @@ def processar_comprovante(telefone: str) -> BotResponse:
 
 def processar_mensagem(telefone: str, mensagem: str) -> BotResponse:
     registrar_cliente_se_nao_existir(telefone)
-    mensagem = mensagem.strip().lower()
+    mensagem_original = (mensagem or "").strip()
+    mensagem = mensagem_original.lower()
     estado, dados = get_estado(telefone)
 
     if estado == "inicio":
@@ -669,7 +688,8 @@ def processar_mensagem(telefone: str, mensagem: str) -> BotResponse:
         set_estado(telefone, "menu")
         return BotResponse(texto=_MENU)
 
-    resposta = handler(telefone, mensagem, dados)
+    mensagem_handler = mensagem_original if estado == "nome" else mensagem
+    resposta = handler(telefone, mensagem_handler, dados)
 
     # Se passou para estado "horario", devolve lista interativa clicável
     novo_estado, novo_dados = get_estado(telefone)

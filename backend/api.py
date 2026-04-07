@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, date, time
 import json
 import jwt
 import os
+import logging
 from pathlib import Path
 
 from database.consultas import (
@@ -13,12 +14,17 @@ from database.consultas import (
     get_total_consultas_historico,
     atualizar_status_consulta,
 )
-from database.mensagens import get_conversas_lista, get_mensagens_por_telefone
+from database.mensagens import get_conversas_lista, get_mensagens_por_telefone, salvar_log_whatsapp
 api = Blueprint("api", __name__, url_prefix="/api")
 
-SECRET_KEY = os.getenv("SECRET_KEY", "chave_secreta")
-MEDICO_USER = os.getenv("MEDICO_USER", "drpaulo")
-MEDICO_PASS = os.getenv("MEDICO_PASS", "senha123")
+logger = logging.getLogger(__name__)
+
+SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
+MEDICO_USER = os.getenv("MEDICO_USER", "").strip()
+MEDICO_PASS = os.getenv("MEDICO_PASS", "").strip()
+
+_SECRET_PLACEHOLDERS = {"", "chave_secreta", "dev_secret", "sua_chave_secreta", "secret"}
+_PASSWORD_PLACEHOLDERS = {"", "senha123", "senha_segura", "password", "123456"}
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -61,6 +67,35 @@ def extrair_texto_payload(payload, fallback=""):
 
 def inferir_sender_type(status_envio: str | None) -> str:
     return "client" if status_envio == "recebido" else "bot"
+
+
+def auth_configurada() -> bool:
+    return (
+        SECRET_KEY not in _SECRET_PLACEHOLDERS
+        and bool(MEDICO_USER)
+        and MEDICO_PASS not in _PASSWORD_PLACEHOLDERS
+    )
+
+
+def registrar_envio_whatsapp(telefone: str, resultado: dict, tipo_mensagem: str | None = None) -> None:
+    response_data = resultado.get("response", {}) if isinstance(resultado, dict) else {}
+    payload = resultado.get("payload", {}) if isinstance(resultado, dict) else {}
+    payload_type = payload.get("type")
+    tipo = tipo_mensagem or payload_type or "texto"
+
+    if tipo == "text":
+        tipo = "texto"
+    elif tipo == "interactive":
+        tipo = "lista"
+
+    salvar_log_whatsapp(
+        telefone_destino=telefone,
+        tipo_mensagem=tipo,
+        message_id=response_data.get("messages", [{}])[0].get("id"),
+        status_envio="erro" if not response_data.get("messages") else "enviado",
+        payload=payload,
+        resposta_api=response_data,
+    )
 
 
 def inferir_file_type(file_name: str, mime_type: str | None, fallback: str) -> str:
@@ -117,6 +152,8 @@ def extrair_anexos_payload(payload):
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        if not auth_configurada():
+            return jsonify({"erro": "Autenticação do painel não configurada"}), 503
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             return jsonify({"erro": "Token não fornecido"}), 401
@@ -134,15 +171,22 @@ def token_required(f):
 @api.route("/auth/login", methods=["POST"])
 def login():
     """
-    Body: { "usuario": "drpaulo", "senha": "senha123" }
+    Body: { "usuario": "...", "senha": "..." }
     Retorna: { "token": "...", "expira_em": "..." }
     """
-    dados = request.get_json()
-    if not dados:
+    if not auth_configurada():
+        logger.error("Tentativa de login com autenticação do painel não configurada.")
+        return jsonify({"erro": "Autenticação do painel não configurada"}), 503
+
+    dados = request.get_json(silent=True)
+    if not isinstance(dados, dict):
         return jsonify({"erro": "Body inválido"}), 400
 
-    usuario = dados.get("usuario", "")
-    senha = dados.get("senha", "")
+    usuario = str(dados.get("usuario", "")).strip()
+    senha = str(dados.get("senha", "")).strip()
+
+    if not usuario or not senha:
+        return jsonify({"erro": "Usuário e senha são obrigatórios"}), 400
 
     if usuario != MEDICO_USER or senha != MEDICO_PASS:
         return jsonify({"erro": "Usuário ou senha incorretos"}), 401
@@ -298,13 +342,15 @@ def confirmar_pagamento(consulta_id):
         if row:
             data_fmt = row["data"].strftime("%d/%m") if hasattr(row["data"], "strftime") else str(row["data"])
             horario_fmt = str(row["horario"])[:5]
-            send_whatsapp_message(
+            resultado_confirmacao = send_whatsapp_message(
                 row["telefone"],
                 f"Pagamento confirmado! ✅\n\n"
                 f"Sua consulta está agendada para {data_fmt} às {horario_fmt}.\n\n"
                 f"Qualquer dúvida, estamos à disposição. Até lá! 💪"
             )
-            send_recomendacoes_pre_consulta(row["telefone"])
+            registrar_envio_whatsapp(row["telefone"], resultado_confirmacao, "texto")
+            resultado_recomendacoes = send_recomendacoes_pre_consulta(row["telefone"])
+            registrar_envio_whatsapp(row["telefone"], resultado_recomendacoes, "texto")
             # Atualiza estado do cliente para consulta_confirmada
             try:
                 from database.estados import set_estado, get_estado
@@ -313,8 +359,9 @@ def confirmar_pagamento(consulta_id):
                 dados_atuais["horario"] = horario_fmt
                 set_estado(row["telefone"], "consulta_confirmada", dados_atuais)
             except Exception:
-                pass
+                logger.exception("Erro ao atualizar estado da conversa após confirmação do pagamento.")
     except Exception:
+        logger.exception("Erro ao notificar cliente após confirmação do pagamento.")
         pass  # Não falha o endpoint se a notificação der erro
 
     return jsonify({

@@ -6,9 +6,30 @@ import Historico from "./pages/Historico";
 import Conversas from "./pages/Conversas";
 import Layout from "./components/Layout";
 
+function tokenValido(token) {
+  if (!token) return false;
+
+  try {
+    const [, payloadBase64] = token.split(".");
+    if (!payloadBase64) return false;
+
+    const payloadJson = atob(payloadBase64.replace(/-/g, "+").replace(/_/g, "/"));
+    const payload = JSON.parse(payloadJson);
+
+    if (!payload?.exp) return true;
+    return Number(payload.exp) * 1000 > Date.now();
+  } catch {
+    return false;
+  }
+}
+
 function RotaProtegida({ children }) {
   const token = localStorage.getItem("token");
-  return token ? children : <Navigate to="/login" replace />;
+  if (!tokenValido(token)) {
+    localStorage.removeItem("token");
+    return <Navigate to="/login" replace />;
+  }
+  return children;
 }
 
 export default function App() {

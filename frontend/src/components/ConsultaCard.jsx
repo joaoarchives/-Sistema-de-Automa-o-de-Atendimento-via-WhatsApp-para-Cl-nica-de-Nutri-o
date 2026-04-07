@@ -62,7 +62,7 @@ export default function ConsultaCard({ consulta, onAtualizar }) {
             textDecoration: consulta.status === "cancelado" ? "line-through" : "none",
             color: consulta.status === "cancelado" ? "#8b949e" : "#e6edf3",
           }}>
-            {consulta.nome} {consulta.sobrenome}
+            {consulta.nome || "Paciente"}
           </div>
           <div style={styles.detalhe}>
             {consulta.telefone}

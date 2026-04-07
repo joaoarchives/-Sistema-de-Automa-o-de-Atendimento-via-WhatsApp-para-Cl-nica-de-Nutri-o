@@ -123,6 +123,7 @@ def get_consultas_hoje(data_referencia=None):
             SELECT
                 c.id,
                 cl.nome,
+                cl.sexo,
                 cl.telefone,
                 c.tipo_consulta,
                 p.nome      AS plano,
@@ -144,11 +145,12 @@ def get_consultas_semana(data_inicio=None):
     data_inicio = data_inicio or date.today()
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        fim = data_inicio + timedelta(days=7)
+        fim = data_inicio + timedelta(days=6)
         cursor.execute("""
             SELECT
                 c.id,
                 cl.nome,
+                cl.sexo,
                 cl.telefone,
                 c.tipo_consulta,
                 p.nome      AS plano,
@@ -183,6 +185,7 @@ def get_consultas_historico(limit=20, offset=0):
             SELECT
                 c.id,
                 cl.nome,
+                cl.sexo,
                 cl.telefone,
                 c.tipo_consulta,
                 p.nome      AS plano,

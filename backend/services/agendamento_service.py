@@ -71,7 +71,12 @@ def confirmar_agendamento(telefone: str, dados: dict) -> ResultadoAgendamento:
             plano_id = plano["id"]
 
     if not horario_esta_disponivel(dados["data"], dados["horario"]):
-        disponiveis, periodo_ativo = buscar_horarios_disponiveis(dados["data"], tipo_consulta, periodo)
+        resultado_horarios = buscar_horarios_disponiveis(dados["data"], tipo_consulta, periodo)
+        if isinstance(resultado_horarios, tuple):
+            disponiveis, periodo_ativo = resultado_horarios
+        else:
+            disponiveis = resultado_horarios or []
+            periodo_ativo = periodo
 
         if not disponiveis:
             return ResultadoAgendamento(
@@ -104,4 +109,8 @@ def confirmar_agendamento(telefone: str, dados: dict) -> ResultadoAgendamento:
     except Exception:
         logger.exception("Erro ao enviar notificação ao médico — telefone=%s", telefone)
 
-    return ResultadoAgendamento(sucesso=True, mensagem="ok", consulta_id=consulta_id)
+    return ResultadoAgendamento(
+        sucesso=True,
+        mensagem="Consulta agendada com sucesso.",
+        consulta_id=consulta_id,
+    )

@@ -1,8 +1,6 @@
 import logging
 import os
 from pathlib import Path
-from urllib.parse import quote
-
 import requests
 
 logger = logging.getLogger(__name__)
@@ -138,7 +136,7 @@ def download_whatsapp_media(media_id: str) -> dict:
     return {
         "content": response.content,
         "mime_type": mime_type,
-        "filename": quote(filename),
+        "filename": filename.replace("\r", "").replace("\n", "").strip(),
     }
 
 

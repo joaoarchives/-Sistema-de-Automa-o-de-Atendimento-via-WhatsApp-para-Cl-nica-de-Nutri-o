@@ -6,7 +6,7 @@ load_dotenv()
 
 
 class Config:
-    SECRET_KEY            = os.getenv("SECRET_KEY", "dev_secret")
+    SECRET_KEY            = os.getenv("SECRET_KEY", "")
     WEBHOOK_VERIFY_TOKEN  = os.getenv("WEBHOOK_VERIFY_TOKEN", "")
     WHATSAPP_TOKEN        = os.getenv("WHATSAPP_TOKEN", "")
     WHATSAPP_PHONE_NUMBER_ID = os.getenv("WHATSAPP_PHONE_NUMBER_ID", "")
