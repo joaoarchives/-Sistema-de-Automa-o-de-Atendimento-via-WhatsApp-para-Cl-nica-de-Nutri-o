@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback } from "react";
 import { getHistorico } from "../api/api";
 import ConsultaCard from "../components/ConsultaCard";
+import useViewport from "../hooks/useViewport";
 
 export default function Historico() {
+  const { isMobile, isSmallMobile } = useViewport();
   const [dados, setDados]     = useState({ consultas: [], total: 0, paginas: 1 });
   const [pagina, setPagina]   = useState(1);
   const [loading, setLoading] = useState(false);
@@ -36,7 +38,7 @@ export default function Historico() {
         {erro    && <p style={styles.erro}>{erro}</p>}
 
         {!loading && !erro && dados.consultas.length === 0 && (
-            <div style={styles.vazio}>
+            <div style={{ ...styles.vazio, ...(isSmallMobile ? styles.vazioMobile : {}) }}>
               <p>Nenhuma consulta encontrada.</p>
             </div>
         )}
@@ -48,10 +50,11 @@ export default function Historico() {
         </div>
 
         {dados.paginas > 1 && (
-            <div style={styles.paginacao}>
+            <div style={{ ...styles.paginacao, ...(isMobile ? styles.paginacaoMobile : {}) }}>
               <button
                   style={{
                     ...styles.btn,
+                    ...(isSmallMobile ? styles.btnMobile : {}),
                     opacity: pagina === 1 ? 0.4 : 1,
                     cursor: pagina === 1 ? "not-allowed" : "pointer",
                   }}
@@ -66,6 +69,7 @@ export default function Historico() {
               <button
                   style={{
                     ...styles.btn,
+                    ...(isSmallMobile ? styles.btnMobile : {}),
                     opacity: pagina === dados.paginas ? 0.4 : 1,
                     cursor: pagina === dados.paginas ? "not-allowed" : "pointer",
                   }}
@@ -100,6 +104,9 @@ const styles = {
     color: "#8b949e",
     fontSize: 14,
   },
+  vazioMobile: {
+    padding: "24px 16px",
+  },
   lista: { display: "flex", flexDirection: "column", gap: 8 },
   paginacao: {
     display: "flex",
@@ -108,8 +115,13 @@ const styles = {
     gap: 16,
     marginTop: 24,
   },
+  paginacaoMobile: {
+    flexWrap: "wrap",
+    justifyContent: "stretch",
+    gap: 12,
+  },
   btn: {
-    padding: "8px 16px",
+    padding: "10px 16px",
     borderRadius: 8,
     border: "0.5px solid #30363d",
     background: "#161b22",
@@ -117,6 +129,10 @@ const styles = {
     fontSize: 13,
     fontWeight: 500,
     transition: "opacity 0.15s",
+  },
+  btnMobile: {
+    flex: "1 1 140px",
+    minHeight: 44,
   },
   pagInfo: { fontSize: 13, color: "#8b949e" },
 };

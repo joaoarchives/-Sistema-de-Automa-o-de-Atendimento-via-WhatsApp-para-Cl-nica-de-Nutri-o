@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { MessageCircle, Search, CheckCheck, AlertCircle } from "lucide-react";
+import { MessageCircle, Search, CheckCheck, AlertCircle, ArrowLeft } from "lucide-react";
 import api from "../api/api";
+import useViewport from "../hooks/useViewport";
 
 function formatarDataLista(iso) {
   if (!iso) return "";
@@ -38,28 +39,21 @@ function inicial(contato) {
 function normalizarSenderType(mensagem) {
   const senderBruto = String(
     mensagem?.senderType ??
-    mensagem?.sender ??
-    mensagem?.role ??
-    mensagem?.author ??
-    mensagem?.from ??
-    "",
-  ).trim().toLowerCase();
+      mensagem?.sender ??
+      mensagem?.role ??
+      mensagem?.author ??
+      mensagem?.from ??
+      "",
+  )
+    .trim()
+    .toLowerCase();
 
-  if (["client", "cliente", "user", "patient", "paciente"].includes(senderBruto)) {
-    return "client";
-  }
-
-  if (["bot", "assistant", "system", "sofia"].includes(senderBruto)) {
-    return "bot";
-  }
+  if (["client", "cliente", "user", "patient", "paciente"].includes(senderBruto)) return "client";
+  if (["bot", "assistant", "system", "sofia"].includes(senderBruto)) return "bot";
 
   const direction = String(mensagem?.direction ?? "").trim().toLowerCase();
-  if (["incoming", "inbound", "received"].includes(direction)) {
-    return "client";
-  }
-  if (["outgoing", "outbound", "sent"].includes(direction)) {
-    return "bot";
-  }
+  if (["incoming", "inbound", "received"].includes(direction)) return "client";
+  if (["outgoing", "outbound", "sent"].includes(direction)) return "bot";
 
   if (mensagem?.fromMe === true) return "bot";
   if (mensagem?.fromMe === false) return "client";
@@ -68,9 +62,7 @@ function normalizarSenderType(mensagem) {
 
   const status = String(mensagem?.status_envio ?? "").trim().toLowerCase();
   if (status === "recebido") return "client";
-  if (["enviado", "sent", "delivered", "entregue", "read", "lido", "erro", "falhou"].includes(status)) {
-    return "bot";
-  }
+  if (["enviado", "sent", "delivered", "entregue", "read", "lido", "erro", "falhou"].includes(status)) return "bot";
 
   return "bot";
 }
@@ -82,20 +74,12 @@ function isTextoTecnico(valor) {
 
 function extrairDisplayDoPayload(payload, fallbackMensagem = {}) {
   if (!payload || typeof payload !== "object") {
-    return {
-      displayText: "",
-      displaySubtext: "",
-      messageKind: fallbackMensagem?.tipo_mensagem || "unknown",
-    };
+    return { displayText: "", displaySubtext: "", messageKind: fallbackMensagem?.tipo_mensagem || "unknown" };
   }
 
-  const tipo = String(
-    payload.type ??
-    fallbackMensagem?.tipo_mensagem ??
-    fallbackMensagem?.messageType ??
-    "",
-  ).trim().toLowerCase();
-
+  const tipo = String(payload.type ?? fallbackMensagem?.tipo_mensagem ?? fallbackMensagem?.messageType ?? "")
+    .trim()
+    .toLowerCase();
   const interactive = payload.interactive || {};
   const listReply = interactive.list_reply || payload.list_reply || {};
   const buttonReply = interactive.button_reply || payload.button_reply || payload.button || {};
@@ -129,51 +113,22 @@ function extrairDisplayDoPayload(payload, fallbackMensagem = {}) {
     };
   }
 
-  if (typeof textNode === "string") {
-    return { displayText: textNode, displaySubtext: "", messageKind: "text" };
-  }
-
-  if (textNode?.body) {
-    return { displayText: textNode.body, displaySubtext: "", messageKind: "text" };
-  }
-
-  if (typeof payload.body === "string") {
-    return { displayText: payload.body, displaySubtext: "", messageKind: tipo || "text" };
-  }
-
-  if (payload.body?.text) {
-    return { displayText: payload.body.text, displaySubtext: "", messageKind: tipo || "text" };
-  }
-
-  if (imageNode.caption) {
-    return { displayText: imageNode.caption, displaySubtext: "", messageKind: "image" };
-  }
-
+  if (typeof textNode === "string") return { displayText: textNode, displaySubtext: "", messageKind: "text" };
+  if (textNode?.body) return { displayText: textNode.body, displaySubtext: "", messageKind: "text" };
+  if (typeof payload.body === "string") return { displayText: payload.body, displaySubtext: "", messageKind: tipo || "text" };
+  if (payload.body?.text) return { displayText: payload.body.text, displaySubtext: "", messageKind: tipo || "text" };
+  if (imageNode.caption) return { displayText: imageNode.caption, displaySubtext: "", messageKind: "image" };
   if (documentNode.caption || documentNode.filename) {
-    return {
-      displayText: documentNode.caption || documentNode.filename || "",
-      displaySubtext: "",
-      messageKind: "document",
-    };
+    return { displayText: documentNode.caption || documentNode.filename || "", displaySubtext: "", messageKind: "document" };
   }
 
-  return {
-    displayText: "",
-    displaySubtext: "",
-    messageKind: tipo || fallbackMensagem?.tipo_mensagem || "unknown",
-  };
+  return { displayText: "", displaySubtext: "", messageKind: tipo || fallbackMensagem?.tipo_mensagem || "unknown" };
 }
 
 function melhorFallbackTexto(mensagem, senderType) {
   const bruto = String(mensagem?.texto || "").trim();
-  if (bruto && !isTextoTecnico(bruto)) {
-    return bruto;
-  }
-
-  if (mensagem?.attachments?.length) {
-    return "";
-  }
-
+  if (bruto && !isTextoTecnico(bruto)) return bruto;
+  if (mensagem?.attachments?.length) return "";
   if (mensagem?.tipo_mensagem === "document") return "Documento enviado";
   if (mensagem?.tipo_mensagem === "image") return "Imagem enviada";
   if (mensagem?.tipo_mensagem === "lista" && senderType === "bot") return "Lista enviada";
@@ -197,7 +152,8 @@ function normalizarMensagem(mensagem) {
 function normalizarConversa(contato) {
   const display = extrairDisplayDoPayload(contato?.ultimo_payload, contato);
   const previewText = display.displayText || (!isTextoTecnico(contato?.ultima_previa) ? contato?.ultima_previa : "");
-  const fallback = contato?.ultimo_tipo === "document" ? "Documento" : contato?.ultimo_tipo === "image" ? "Imagem" : "Sem mensagens";
+  const fallback =
+    contato?.ultimo_tipo === "document" ? "Documento" : contato?.ultimo_tipo === "image" ? "Imagem" : "Sem mensagens";
 
   return {
     ...contato,
@@ -228,13 +184,10 @@ function isUrlProtegida(url) {
 }
 
 function temTextoRelevante(mensagem) {
-  const texto = String(mensagem?.displayText || "").trim();
-  const subtexto = String(mensagem?.displaySubtext || "").trim();
-  if (texto || subtexto) return true;
-  return false;
+  return Boolean(String(mensagem?.displayText || "").trim() || String(mensagem?.displaySubtext || "").trim());
 }
 
-function AnexoImagem({ attachment, onOpen }) {
+function AnexoImagem({ attachment, onOpen, isMobile }) {
   const [src, setSrc] = useState("");
   const [loading, setLoading] = useState(true);
   const [erro, setErro] = useState("");
@@ -269,17 +222,17 @@ function AnexoImagem({ attachment, onOpen }) {
     };
   }, [attachment.fileUrl]);
 
-  if (loading) return <div style={s.imageLoading}>Carregando imagem...</div>;
+  if (loading) return <div style={{ ...s.imageLoading, ...(isMobile ? s.imageLoadingMobile : {}) }}>Carregando imagem...</div>;
   if (erro) return <div style={s.attachmentError}>{erro}</div>;
 
   return (
     <button type="button" onClick={() => onOpen(src, attachment.fileName)} style={s.imageButton}>
-      <img src={src} alt={attachment.fileName} style={s.imagePreview} />
+      <img src={src} alt={attachment.fileName} style={{ ...s.imagePreview, ...(isMobile ? s.imagePreviewMobile : {}) }} />
     </button>
   );
 }
 
-function AnexoArquivo({ attachment }) {
+function AnexoArquivo({ attachment, isMobile }) {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
 
@@ -309,7 +262,7 @@ function AnexoArquivo({ attachment }) {
       } else {
         window.open(objectUrl, "_blank", "noopener,noreferrer");
       }
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
     } catch {
       setErro("Erro ao carregar anexo");
     } finally {
@@ -318,7 +271,7 @@ function AnexoArquivo({ attachment }) {
   }
 
   return (
-    <div style={s.fileCard}>
+    <div style={{ ...s.fileCard, ...(isMobile ? s.fileCardMobile : {}) }}>
       <div style={s.fileBadge}>{extensaoArquivo(attachment)}</div>
       <div style={s.fileBody}>
         <div style={s.fileName}>{attachment.fileName || "Arquivo"}</div>
@@ -326,11 +279,11 @@ function AnexoArquivo({ attachment }) {
           {attachment.mimeType || attachment.fileType}
           {formatarTamanho(attachment.size) ? ` - ${formatarTamanho(attachment.size)}` : ""}
         </div>
-        <div style={s.fileActions}>
-          <button type="button" onClick={() => abrirOuBaixar(false)} style={s.fileActionBtn} disabled={loading}>
+        <div style={{ ...s.fileActions, ...(isMobile ? s.fileActionsMobile : {}) }}>
+          <button type="button" onClick={() => abrirOuBaixar(false)} style={{ ...s.fileActionBtn, ...(isMobile ? s.fileActionBtnMobile : {}) }} disabled={loading}>
             Abrir
           </button>
-          <button type="button" onClick={() => abrirOuBaixar(true)} style={s.fileActionBtn} disabled={loading}>
+          <button type="button" onClick={() => abrirOuBaixar(true)} style={{ ...s.fileActionBtn, ...(isMobile ? s.fileActionBtnMobile : {}) }} disabled={loading}>
             Baixar
           </button>
         </div>
@@ -339,7 +292,9 @@ function AnexoArquivo({ attachment }) {
     </div>
   );
 }
+
 export default function Conversas() {
+  const { isMobile, isSmallMobile } = useViewport();
   const [conversas, setConversas] = useState([]);
   const [selecionado, setSelecionado] = useState(null);
   const [mensagens, setMensagens] = useState([]);
@@ -348,6 +303,11 @@ export default function Conversas() {
   const [loadingLista, setLoadingLista] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
   const [erro, setErro] = useState("");
+  const [listaAbertaMobile, setListaAbertaMobile] = useState(true);
+
+  useEffect(() => {
+    if (!isMobile) setListaAbertaMobile(true);
+  }, [isMobile]);
 
   const carregarLista = useCallback(async () => {
     setLoadingLista(true);
@@ -364,18 +324,22 @@ export default function Conversas() {
     }
   }, []);
 
-  const abrirConversa = useCallback(async (contato) => {
-    setSelecionado(contato);
-    setLoadingChat(true);
-    try {
-      const res = await api.get(`/api/conversas/${encodeURIComponent(contato.telefone)}`);
-      setMensagens((res.data.mensagens || []).map(normalizarMensagem));
-    } catch {
-      setMensagens([]);
-    } finally {
-      setLoadingChat(false);
-    }
-  }, []);
+  const abrirConversa = useCallback(
+    async (contato) => {
+      setSelecionado(contato);
+      setLoadingChat(true);
+      try {
+        const res = await api.get(`/api/conversas/${encodeURIComponent(contato.telefone)}`);
+        setMensagens((res.data.mensagens || []).map(normalizarMensagem));
+        if (isMobile) setListaAbertaMobile(false);
+      } catch {
+        setMensagens([]);
+      } finally {
+        setLoadingChat(false);
+      }
+    },
+    [isMobile],
+  );
 
   useEffect(() => {
     carregarLista();
@@ -397,125 +361,147 @@ export default function Conversas() {
     );
   }, [busca, conversas]);
 
+  const mostrarLista = !isMobile || listaAbertaMobile || !selecionado;
+  const mostrarChat = !isMobile || (!listaAbertaMobile && !!selecionado);
+
   return (
-    <div style={s.page}>
-      <aside style={s.sidebar}>
-        <div style={s.sidebarHeader}>
-          <h1 style={s.title}>Conversas</h1>
-          <div style={s.searchBox}>
-            <Search size={15} color="#64748b" />
-            <input
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              placeholder="Buscar paciente..."
-              style={s.searchInput}
-            />
+    <div
+      style={{
+        ...s.page,
+        ...(isMobile ? s.pageMobile : {}),
+      }}
+    >
+      {mostrarLista && (
+        <aside style={{ ...s.sidebar, ...(isMobile ? s.sidebarMobile : {}) }}>
+          <div style={s.sidebarHeader}>
+            <h1 style={s.title}>Conversas</h1>
+            <div style={s.searchBox}>
+              <Search size={15} color="#64748b" />
+              <input
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Buscar paciente..."
+                style={s.searchInput}
+              />
+            </div>
           </div>
-        </div>
 
-        <div style={s.contactList}>
-          {loadingLista && <p style={s.sideInfo}>Carregando...</p>}
-          {erro && <p style={s.sideError}>{erro}</p>}
-          {!loadingLista && !conversasFiltradas.length && <p style={s.sideInfo}>Nenhuma conversa.</p>}
+          <div style={s.contactList}>
+            {loadingLista && <p style={s.sideInfo}>Carregando...</p>}
+            {erro && <p style={s.sideError}>{erro}</p>}
+            {!loadingLista && !conversasFiltradas.length && <p style={s.sideInfo}>Nenhuma conversa.</p>}
 
-          {conversasFiltradas.map((contato) => {
-            const ativo = selecionado?.telefone === contato.telefone;
-            return (
-              <button
-                key={contato.telefone}
-                onClick={() => abrirConversa(contato)}
-                style={{ ...s.contactItem, ...(ativo ? s.contactItemActive : {}) }}
-              >
-                <div style={s.avatar}>{inicial(contato)}</div>
-                <div style={s.contactMain}>
-                  <div style={s.contactTop}>
-                    <div style={s.contactName}>{contato.nome || contato.telefone}</div>
-                    <div style={s.contactDate}>{formatarDataLista(contato.ultima_mensagem)}</div>
-                  </div>
-                  <div style={s.contactPreview}>
-                    <span style={s.contactPreviewIcon}>🗓️</span>
-                    <span style={s.contactPreviewText}>
-                      {resumoTexto(contato.previewText, contato.ultimo_tipo)}
-                    </span>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </aside>
-
-      <section style={s.chat}>
-        {!selecionado ? (
-          <div style={s.emptyState}>
-            <MessageCircle size={40} color="#314155" />
-            <p style={s.emptyText}>Selecione uma conversa</p>
-          </div>
-        ) : (
-          <>
-            <header style={s.chatHeader}>
-              <div style={s.avatarLarge}>{inicial(selecionado)}</div>
-              <div>
-                <div style={s.headerName}>{selecionado.nome || selecionado.telefone}</div>
-                <div style={s.headerPhone}>{selecionado.telefone}</div>
-              </div>
-            </header>
-
-            <div style={s.chatBody}>
-              {loadingChat && <p style={s.sideInfo}>Carregando mensagens...</p>}
-              {!loadingChat && !mensagens.length && <p style={s.sideInfo}>Nenhuma mensagem encontrada.</p>}
-
-              {mensagens.map((mensagem) => {
-                const bot = mensagem.senderType === "bot";
-                return (
-                  <div
-                    key={mensagem.id}
-                    style={{
-                      ...s.row,
-                      justifyContent: bot ? "flex-start" : "flex-end",
-                    }}
-                  >
-                    <div style={{ ...s.bubble, ...(bot ? s.bubbleBot : s.bubbleCliente) }}>
-                      {bot && <div style={s.label}>Sofia</div>}
-                      {mensagem.attachments?.length > 0 && (
-                        <div style={s.attachmentsWrap}>
-                          {mensagem.attachments.map((attachment) =>
-                            isImagem(attachment) ? (
-                              <AnexoImagem
-                                key={attachment.id}
-                                attachment={attachment}
-                                onOpen={(src, nome) => setImagemAberta({ src, nome })}
-                              />
-                            ) : (
-                              <AnexoArquivo key={attachment.id} attachment={attachment} />
-                            ),
-                          )}
-                        </div>
-                      )}
-                      {temTextoRelevante(mensagem) && (
-                        <div>
-                          {mensagem.displayText && <div style={s.text}>{mensagem.displayText}</div>}
-                          {mensagem.displaySubtext && <div style={s.subtext}>{mensagem.displaySubtext}</div>}
-                        </div>
-                      )}
-                      <div style={s.meta}>
-                        <span>{formatarHora(mensagem.timestamp || mensagem.criado_em)}</span>
-                        {bot && iconeStatus(mensagem.status_envio)}
-                      </div>
+            {conversasFiltradas.map((contato) => {
+              const ativo = selecionado?.telefone === contato.telefone;
+              return (
+                <button
+                  key={contato.telefone}
+                  onClick={() => abrirConversa(contato)}
+                  style={{ ...s.contactItem, ...(ativo ? s.contactItemActive : {}) }}
+                >
+                  <div style={s.avatar}>{inicial(contato)}</div>
+                  <div style={s.contactMain}>
+                    <div style={s.contactTop}>
+                      <div style={s.contactName}>{contato.nome || contato.telefone}</div>
+                      <div style={s.contactDate}>{formatarDataLista(contato.ultima_mensagem)}</div>
+                    </div>
+                    <div style={s.contactPreview}>
+                      <span style={s.contactPreviewIcon}>🗨️</span>
+                      <span style={s.contactPreviewText}>{resumoTexto(contato.previewText, contato.ultimo_tipo)}</span>
                     </div>
                   </div>
-                );
-              })}
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      )}
+
+      {mostrarChat && (
+        <section style={{ ...s.chat, ...(isMobile ? s.chatMobile : {}) }}>
+          {!selecionado ? (
+            <div style={s.emptyState}>
+              <MessageCircle size={40} color="#314155" />
+              <p style={s.emptyText}>Selecione uma conversa</p>
             </div>
-          </>
-        )}
-      </section>
+          ) : (
+            <>
+              <header style={{ ...s.chatHeader, ...(isSmallMobile ? s.chatHeaderMobile : {}) }}>
+                {isMobile && (
+                  <button type="button" style={s.backButton} onClick={() => setListaAbertaMobile(true)} aria-label="Voltar para lista">
+                    <ArrowLeft size={18} />
+                  </button>
+                )}
+                <div style={s.avatarLarge}>{inicial(selecionado)}</div>
+                <div style={s.headerMain}>
+                  <div style={s.headerName}>{selecionado.nome || selecionado.telefone}</div>
+                  <div style={s.headerPhone}>{selecionado.telefone}</div>
+                </div>
+              </header>
+
+              <div style={{ ...s.chatBody, ...(isMobile ? s.chatBodyMobile : {}) }}>
+                {loadingChat && <p style={s.sideInfo}>Carregando mensagens...</p>}
+                {!loadingChat && !mensagens.length && <p style={s.sideInfo}>Nenhuma mensagem encontrada.</p>}
+
+                {mensagens.map((mensagem) => {
+                  const bot = mensagem.senderType === "bot";
+                  return (
+                    <div
+                      key={mensagem.id}
+                      style={{
+                        ...s.row,
+                        justifyContent: bot ? "flex-start" : "flex-end",
+                      }}
+                    >
+                      <div
+                        style={{
+                          ...s.bubble,
+                          ...(bot ? s.bubbleBot : s.bubbleCliente),
+                          ...(isMobile ? s.bubbleMobile : {}),
+                        }}
+                      >
+                        {bot && <div style={s.label}>Sofia</div>}
+                        {mensagem.attachments?.length > 0 && (
+                          <div style={s.attachmentsWrap}>
+                            {mensagem.attachments.map((attachment) =>
+                              isImagem(attachment) ? (
+                                <AnexoImagem
+                                  key={attachment.id}
+                                  attachment={attachment}
+                                  isMobile={isMobile}
+                                  onOpen={(src, nome) => setImagemAberta({ src, nome })}
+                                />
+                              ) : (
+                                <AnexoArquivo key={attachment.id} attachment={attachment} isMobile={isMobile} />
+                              ),
+                            )}
+                          </div>
+                        )}
+                        {temTextoRelevante(mensagem) && (
+                          <div>
+                            {mensagem.displayText && <div style={s.text}>{mensagem.displayText}</div>}
+                            {mensagem.displaySubtext && <div style={s.subtext}>{mensagem.displaySubtext}</div>}
+                          </div>
+                        )}
+                        <div style={s.meta}>
+                          <span>{formatarHora(mensagem.timestamp || mensagem.criado_em)}</span>
+                          {bot && iconeStatus(mensagem.status_envio)}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </section>
+      )}
 
       {imagemAberta && (
         <div style={s.modalOverlay} onClick={() => setImagemAberta(null)}>
           <div style={s.modalCard} onClick={(e) => e.stopPropagation()}>
             <img src={imagemAberta.src} alt={imagemAberta.nome} style={s.modalImage} />
-            <div style={s.modalFooter}>
+            <div style={{ ...s.modalFooter, ...(isSmallMobile ? s.modalFooterMobile : {}) }}>
               <span style={s.modalName}>{imagemAberta.nome}</span>
               <button type="button" onClick={() => setImagemAberta(null)} style={s.modalClose}>
                 Fechar
@@ -535,10 +521,15 @@ const s = {
     marginLeft: -32,
     marginRight: -32,
     marginBottom: -32,
-    minHeight: "100vh",
+    minHeight: "calc(100vh - 64px)",
     background: "#0d131b",
     color: "#e5edf6",
     overflow: "hidden",
+  },
+  pageMobile: {
+    display: "block",
+    margin: -16,
+    minHeight: "calc(100dvh - 32px)",
   },
   sidebar: {
     width: 330,
@@ -547,6 +538,11 @@ const s = {
     borderRight: "1px solid #283445",
     display: "flex",
     flexDirection: "column",
+  },
+  sidebarMobile: {
+    width: "100%",
+    minWidth: 0,
+    minHeight: "calc(100dvh - 32px)",
   },
   sidebarHeader: {
     padding: "22px 18px 14px",
@@ -562,7 +558,7 @@ const s = {
     display: "flex",
     alignItems: "center",
     gap: 10,
-    height: 36,
+    height: 40,
     padding: "0 12px",
     background: "#0f141b",
     border: "1px solid #2a3443",
@@ -673,9 +669,14 @@ const s = {
   },
   chat: {
     flex: 1,
+    minWidth: 0,
     display: "flex",
     flexDirection: "column",
     background: "#0c1219",
+  },
+  chatMobile: {
+    width: "100%",
+    minHeight: "calc(100dvh - 32px)",
   },
   chatHeader: {
     display: "flex",
@@ -684,6 +685,25 @@ const s = {
     padding: "16px 22px",
     background: "#171d25",
     borderBottom: "1px solid #283445",
+  },
+  chatHeaderMobile: {
+    padding: "14px 16px",
+  },
+  backButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    border: "1px solid #2a3443",
+    background: "#0f141b",
+    color: "#e5edf6",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    flexShrink: 0,
+  },
+  headerMain: {
+    minWidth: 0,
   },
   headerName: {
     fontSize: 15,
@@ -704,6 +724,9 @@ const s = {
     backgroundColor: "#0b141a",
     backgroundImage: "radial-gradient(rgba(255,255,255,0.03) 1px, transparent 1px)",
     backgroundSize: "18px 18px",
+  },
+  chatBodyMobile: {
+    padding: "16px 12px calc(20px + env(safe-area-inset-bottom, 0px))",
   },
   emptyState: {
     flex: 1,
@@ -728,6 +751,10 @@ const s = {
     borderRadius: 16,
     padding: "10px 12px 8px",
     boxShadow: "0 8px 20px rgba(0,0,0,0.18)",
+  },
+  bubbleMobile: {
+    maxWidth: "84%",
+    minWidth: 0,
   },
   bubbleBot: {
     background: "#202c33",
@@ -779,6 +806,10 @@ const s = {
     objectFit: "cover",
     borderRadius: 12,
   },
+  imagePreviewMobile: {
+    maxWidth: "100%",
+    maxHeight: 220,
+  },
   imageLoading: {
     minWidth: 180,
     minHeight: 120,
@@ -790,6 +821,10 @@ const s = {
     color: "#cbd5e1",
     fontSize: 12,
   },
+  imageLoadingMobile: {
+    minWidth: 0,
+    width: "100%",
+  },
   fileCard: {
     display: "flex",
     gap: 10,
@@ -797,6 +832,10 @@ const s = {
     background: "rgba(255,255,255,0.08)",
     borderRadius: 12,
     minWidth: 220,
+  },
+  fileCardMobile: {
+    minWidth: 0,
+    width: "100%",
   },
   fileBadge: {
     width: 48,
@@ -833,6 +872,9 @@ const s = {
     gap: 8,
     marginTop: 8,
   },
+  fileActionsMobile: {
+    flexWrap: "wrap",
+  },
   fileActionBtn: {
     border: "none",
     borderRadius: 8,
@@ -841,6 +883,10 @@ const s = {
     color: "#e2e8f0",
     fontSize: 12,
     cursor: "pointer",
+  },
+  fileActionBtnMobile: {
+    minHeight: 40,
+    flex: "1 1 90px",
   },
   attachmentError: {
     marginTop: 6,
@@ -886,6 +932,10 @@ const s = {
     gap: 12,
     color: "#e5edf6",
   },
+  modalFooterMobile: {
+    flexDirection: "column",
+    alignItems: "stretch",
+  },
   modalName: {
     fontSize: 13,
     whiteSpace: "nowrap",
@@ -895,7 +945,7 @@ const s = {
   modalClose: {
     border: "none",
     borderRadius: 8,
-    padding: "8px 12px",
+    padding: "10px 12px",
     background: "#1f2937",
     color: "#fff",
     cursor: "pointer",

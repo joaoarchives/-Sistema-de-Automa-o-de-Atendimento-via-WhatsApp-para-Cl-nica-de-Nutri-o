@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { getAgendaDia } from "../api/api";
 import ConsultaCard from "../components/ConsultaCard";
+import useViewport from "../hooks/useViewport";
 
 function hojeISO() {
   return new Date().toISOString().slice(0, 10);
@@ -12,6 +13,7 @@ function formatarDataBR(iso) {
 }
 
 export default function AgendaDia() {
+  const { isMobile, isSmallMobile } = useViewport();
   const [data, setData]           = useState(hojeISO());
   const [consultas, setConsultas] = useState([]);
   const [loading, setLoading]     = useState(false);
@@ -38,7 +40,7 @@ export default function AgendaDia() {
 
   return (
       <div>
-        <div style={styles.header}>
+        <div style={{ ...styles.header, ...(isMobile ? styles.headerMobile : {}) }}>
           <div>
             <h2 style={styles.titulo}>Agenda do Dia</h2>
             <p style={styles.sub}>{formatarDataBR(data)}</p>
@@ -47,12 +49,12 @@ export default function AgendaDia() {
               type="date"
               value={data}
               onChange={(e) => setData(e.target.value)}
-              style={styles.datePicker}
+              style={{ ...styles.datePicker, ...(isMobile ? styles.datePickerMobile : {}) }}
           />
         </div>
 
         {consultas.length > 0 && (
-            <div style={styles.statsRow}>
+            <div style={{ ...styles.statsRow, ...(isMobile ? styles.statsRowMobile : {}) }}>
               <div style={styles.statCard}>
                 <div style={styles.statLabel}>Total</div>
                 <div style={styles.statValue}>{consultas.length}</div>
@@ -76,7 +78,7 @@ export default function AgendaDia() {
         {erro    && <p style={styles.erro}>{erro}</p>}
 
         {!loading && !erro && consultas.length === 0 && (
-            <div style={styles.vazio}>
+            <div style={{ ...styles.vazio, ...(isSmallMobile ? styles.vazioMobile : {}) }}>
               <p>Nenhuma consulta para este dia.</p>
             </div>
         )}
@@ -97,6 +99,11 @@ const styles = {
     alignItems: "flex-start",
     marginBottom: 24,
   },
+  headerMobile: {
+    flexDirection: "column",
+    gap: 14,
+    alignItems: "stretch",
+  },
   titulo:     { margin: 0, fontSize: 20, fontWeight: 600, color: "#e6edf3" },
   sub:        { margin: "4px 0 0", fontSize: 13, color: "#8b949e" },
   datePicker: {
@@ -109,11 +116,18 @@ const styles = {
     cursor: "pointer",
     outline: "none",
   },
+  datePickerMobile: {
+    width: "100%",
+    minHeight: 44,
+  },
   statsRow: {
     display: "grid",
     gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
     gap: 12,
     marginBottom: 24,
+  },
+  statsRowMobile: {
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
   },
   statCard: {
     background: "#161b22",
@@ -133,6 +147,9 @@ const styles = {
     textAlign: "center",
     color: "#8b949e",
     fontSize: 14,
+  },
+  vazioMobile: {
+    padding: "24px 16px",
   },
   lista: { display: "flex", flexDirection: "column", gap: 8 },
 };
