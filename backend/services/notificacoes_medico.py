@@ -1,10 +1,11 @@
-import logging
-from datetime import date, datetime
+﻿import logging
+from datetime import datetime
 
 from database.connection import get_db
 from database.mensagens import salvar_log_whatsapp
 from services.whatsapp import send_whatsapp_message
 from utils.helpers import timedelta_para_hhmm
+from utils.time_utils import local_today
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def montar_resumo_do_dia(consultas: list[dict], data_ref: str) -> str:
 
 
 def enviar_resumo_das_06() -> dict | None:
-    hoje = date.today().isoformat()
+    hoje = local_today().isoformat()
     consultas = listar_consultas_do_dia(hoje)
 
     if not consultas:
@@ -118,7 +119,7 @@ def buscar_detalhes_consulta(telefone: str, data_ref: str, horario: str) -> dict
 def avisar_medico_nova_consulta_hoje(
     telefone: str, data_ref: str, horario: str
 ) -> dict | None:
-    if str(data_ref) != date.today().isoformat():
+    if str(data_ref) != local_today().isoformat():
         return None
 
     consulta = buscar_detalhes_consulta(telefone, data_ref, horario)

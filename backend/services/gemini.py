@@ -1,4 +1,4 @@
-"""
+﻿"""
 Serviço de integração com o Google Gemini (google-genai SDK).
 
 Responsabilidades:
@@ -9,6 +9,8 @@ Responsabilidades:
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+from datetime import timedelta
 
 from google import genai
 from google.genai import types
@@ -16,11 +18,15 @@ from google.genai import types
 logger = logging.getLogger(__name__)
 
 _client = None
+_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+_GEMINI_TIMEOUT_SECONDS = float(os.getenv("GEMINI_TIMEOUT_SECONDS", "12"))
+_GEMINI_MAX_WORKERS = max(1, int(os.getenv("GEMINI_MAX_WORKERS", "4")))
+_executor = ThreadPoolExecutor(max_workers=_GEMINI_MAX_WORKERS, thread_name_prefix="gemini")
 
 
 # ── Fallback local para datas sem chamar a API ───────────────────────────────
 
-from datetime import date, timedelta
+from utils.time_utils import local_today
 
 _DIAS_SEMANA_PT = {
     "segunda": 0, "segunda-feira": 0, "segunda feira": 0,
@@ -32,35 +38,59 @@ _DIAS_SEMANA_PT = {
     "domingo": 6,
 }
 
+
 def _fallback_data_local(mensagem: str) -> dict | None:
     """Tenta interpretar datas comuns sem chamar a API."""
     msg = mensagem.strip().lower()
+    hoje_local = local_today()
 
-    # Hoje / amanhã
     if msg in ("hoje",):
-        return {"data": date.today().strftime("%d/%m/%Y"), "sucesso": True}
+        return {"data": hoje_local.strftime("%d/%m/%Y"), "sucesso": True}
     if msg in ("amanhã", "amanha"):
-        d = date.today() + timedelta(days=1)
+        d = hoje_local + timedelta(days=1)
         return {"data": d.strftime("%d/%m/%Y"), "sucesso": True}
 
-    # Dia da semana → próxima ocorrência a partir de amanhã
     for nome, weekday in _DIAS_SEMANA_PT.items():
         if msg == nome or msg.startswith(nome):
-            hoje = date.today()
-            dias_ate = (weekday - hoje.weekday()) % 7
+            dias_ate = (weekday - hoje_local.weekday()) % 7
             if dias_ate == 0:
-                dias_ate = 7  # se hoje é o mesmo dia, vai para a próxima semana
-            d = hoje + timedelta(days=dias_ate)
+                dias_ate = 7
+            d = hoje_local + timedelta(days=dias_ate)
             return {"data": d.strftime("%d/%m/%Y"), "sucesso": True}
 
     return None
 
 
+def _api_key() -> str:
+    return os.getenv("GEMINI_API_KEY", "").strip()
+
+
 def _get_client() -> genai.Client:
     global _client
     if _client is None:
-        _client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        api_key = _api_key()
+        if not api_key:
+            raise RuntimeError("GEMINI_API_KEY não configurada")
+        _client = genai.Client(api_key=api_key)
     return _client
+
+
+def _generate_content(contents, config):
+    client = _get_client()
+    return client.models.generate_content(
+        model=_GEMINI_MODEL,
+        contents=contents,
+        config=config,
+    )
+
+
+def _call_gemini(contents, config):
+    future = _executor.submit(_generate_content, contents, config)
+    try:
+        return future.result(timeout=_GEMINI_TIMEOUT_SECONDS)
+    except FuturesTimeoutError as exc:
+        future.cancel()
+        raise TimeoutError(f"Gemini excedeu {_GEMINI_TIMEOUT_SECONDS}s") from exc
 
 
 SYSTEM_PROMPT = """
@@ -158,22 +188,16 @@ Se não conseguir identificar, retorne exatamente:
 
 
 def responder_livre(mensagem: str) -> str:
-    """
-    Gera uma resposta livre para mensagens fora do fluxo de agendamento.
-    """
     try:
-        client = _get_client()
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=mensagem,
-            config=types.GenerateContentConfig(
+        response = _call_gemini(
+            mensagem,
+            types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 max_output_tokens=600,
                 temperature=0.7,
             ),
         )
         return response.text.strip()
-
     except Exception:
         logger.exception("Erro ao chamar Gemini (responder_livre)")
         return (
@@ -184,25 +208,18 @@ def responder_livre(mensagem: str) -> str:
 
 
 def interpretar_data(mensagem: str, hoje: str, hoje_nome: str) -> dict:
-    """
-    Interpreta uma mensagem em linguagem natural e extrai a data.
-    Retorna dict com: {"data": "DD/MM/AAAA", "sucesso": bool}
-    """
-    # Tenta fallback local primeiro (mais rápido e confiável para casos comuns)
     resultado_local = _fallback_data_local(mensagem)
     if resultado_local:
         return resultado_local
 
     try:
-        client = _get_client()
         prompt = PROMPT_INTERPRETAR_DATA.format(
             mensagem=mensagem, hoje=hoje, hoje_nome=hoje_nome
         )
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
+        response = _call_gemini(
+            prompt,
+            types.GenerateContentConfig(
                 max_output_tokens=100,
                 temperature=0,
             ),
@@ -216,10 +233,10 @@ def interpretar_data(mensagem: str, hoje: str, hoje_nome: str) -> dict:
         if match:
             texto = match.group(0)
         return json.loads(texto)
-
     except Exception:
         logger.exception("Erro ao interpretar data com Gemini")
         return {"data": None, "sucesso": False}
+
 
 PROMPT_DETECTAR_INTENCAO = """
 Contexto: o bot perguntou ao cliente se ele gostaria de agendar uma consulta ou tinha alguma dúvida.
@@ -229,7 +246,7 @@ O cliente respondeu: "{mensagem}"
 Classifique a intenção em uma palavra:
 
 - "agendar": cliente quer marcar/agendar consulta. Exemplos: "quero", "sim", "1", "gostaria de agendar", "vou agendar", "pode marcar", "quero sim", "claro", "gostaria"
-- "recusar": cliente não quer agendar agora. Exemplos: "não", "obrigado", "tchau", "depois", "n"  
+- "recusar": cliente não quer agendar agora. Exemplos: "não", "obrigado", "tchau", "depois", "n"
 - "duvida": cliente faz uma PERGUNTA ou pede informação. Exemplos: "como funciona?", "qual o preço?", "ok, como funcionam os retornos"
 
 Regra principal: se há uma pergunta (?) ou palavras como "como", "qual", "quanto", "o que", "quando" → é "duvida".
@@ -240,14 +257,12 @@ Responda APENAS com uma palavra: agendar, recusar ou duvida
 
 
 def _extrair_texto(response) -> str:
-    """Extrai o texto da resposta do Gemini de forma segura."""
     try:
         return response.text or ""
     except Exception:
         return ""
 
 
-# Mensagens EXATAS que indicam intenção clara de agendar ou recusar
 _EXATO_AGENDAR = {
     "1", "sim", "s",
     "agendar", "marcar",
@@ -260,11 +275,6 @@ _EXATO_RECUSAR = {"2", "não", "nao", "n", "obrigado", "obg", "tchau", "até", "
 
 
 def detectar_intencao(mensagem: str) -> str:
-    """
-    Detecta a intenção do cliente: 'agendar', 'recusar' ou 'duvida'.
-    Tenta via Gemini; se falhar, usa palavras-chave exatas como fallback.
-    """
-    # Fallback apenas para mensagens curtas e exatas (evita falsos positivos em perguntas)
     msg_lower = mensagem.strip().lower()
     if msg_lower in _EXATO_AGENDAR:
         return "agendar"
@@ -272,13 +282,11 @@ def detectar_intencao(mensagem: str) -> str:
         return "recusar"
 
     try:
-        client = _get_client()
         prompt = PROMPT_DETECTAR_INTENCAO.format(mensagem=mensagem)
 
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
+        response = _call_gemini(
+            prompt,
+            types.GenerateContentConfig(
                 max_output_tokens=10,
                 temperature=0,
             ),
@@ -288,7 +296,6 @@ def detectar_intencao(mensagem: str) -> str:
         if texto in ("agendar", "recusar", "duvida"):
             return texto
         return "duvida"
-
     except Exception:
         logger.exception("Erro ao detectar intenção com Gemini")
         return "duvida"

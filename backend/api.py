@@ -1,11 +1,13 @@
-from flask import Blueprint, Response, request, jsonify
-from functools import wraps
-from datetime import datetime, timedelta, date, time
+﻿from datetime import date, datetime, timedelta
 import json
 import jwt
 import os
 import logging
 from pathlib import Path
+from functools import wraps
+
+from flask import Blueprint, Response, request, jsonify
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from database.consultas import (
     get_consultas_hoje,
@@ -16,27 +18,29 @@ from database.consultas import (
 )
 from database.mensagens import get_conversas_lista, get_mensagens_por_telefone, salvar_log_whatsapp
 from database.runtime_guards import clear_login_failures, get_login_rate_limit, register_login_failure
-api = Blueprint("api", __name__, url_prefix="/api")
+from utils.time_utils import local_today, utc_isoformat, utc_now
 
+api = Blueprint("api", __name__, url_prefix="/api")
 logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
 MEDICO_USER = os.getenv("MEDICO_USER", "").strip()
 MEDICO_PASS = os.getenv("MEDICO_PASS", "").strip()
+MEDICO_PASS_HASH = os.getenv("MEDICO_PASS_HASH", "").strip()
+_LEGACY_PASSWORD_HASH = generate_password_hash(MEDICO_PASS) if MEDICO_PASS else ""
 
 _SECRET_PLACEHOLDERS = {"", "chave_secreta", "dev_secret", "sua_chave_secreta", "secret"}
 _MAX_LOGIN_ATTEMPTS = int(os.getenv("LOGIN_MAX_TENTATIVAS", "5"))
 _LOGIN_BLOCK_MINUTES = int(os.getenv("LOGIN_BLOQUEIO_MINUTOS", "15"))
+_MAX_POR_PAGINA = int(os.getenv("HISTORICO_MAX_POR_PAGINA", "100"))
 
-
-# ── Auth ─────────────────────────────────────────────────────────────────────
 
 def limpar_row(row):
     resultado = {}
     for k, v in row.items():
         if isinstance(v, date):
             resultado[k] = v.isoformat()
-        elif hasattr(v, 'seconds'):  # timedelta (MySQL TIME)
+        elif hasattr(v, "seconds"):
             total = int(v.total_seconds())
             h = total // 3600
             m = (total % 3600) // 60
@@ -91,11 +95,15 @@ def get_client_ip() -> str:
     return (request.remote_addr or "desconhecido").strip()
 
 
+def get_password_hash() -> str:
+    return MEDICO_PASS_HASH or _LEGACY_PASSWORD_HASH
+
+
 def auth_configurada() -> bool:
     return (
         SECRET_KEY not in _SECRET_PLACEHOLDERS
         and bool(MEDICO_USER)
-        and bool(MEDICO_PASS)
+        and bool(get_password_hash())
     )
 
 
@@ -180,6 +188,26 @@ def extrair_anexos_payload(payload):
 
     return [anexo for anexo in anexos if anexo.get("fileUrl")]
 
+
+def parse_positive_int_arg(name: str, default: int, *, minimum: int = 1, maximum: int | None = None):
+    raw_value = request.args.get(name)
+    if raw_value is None or raw_value == "":
+        return default, None
+
+    try:
+        value = int(raw_value)
+    except (TypeError, ValueError):
+        return None, f"Parâmetro '{name}' inválido. Use um número inteiro."
+
+    if value < minimum:
+        return None, f"Parâmetro '{name}' inválido. O mínimo permitido é {minimum}."
+
+    if maximum is not None and value > maximum:
+        return None, f"Parâmetro '{name}' inválido. O máximo permitido é {maximum}."
+
+    return value, None
+
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -201,10 +229,6 @@ def token_required(f):
 
 @api.route("/auth/login", methods=["POST"])
 def login():
-    """
-    Body: { "usuario": "...", "senha": "..." }
-    Retorna: { "token": "...", "expira_em": "..." }
-    """
     if not auth_configurada():
         logger.error("Tentativa de login com autenticação do painel não configurada.")
         return jsonify({"erro": "Autenticação do painel não configurada"}), 503
@@ -224,10 +248,12 @@ def login():
     if rate_limit["bloqueado"]:
         return jsonify({
             "erro": "Muitas tentativas de login. Tente novamente em alguns minutos.",
-            "bloqueado_ate": rate_limit["bloqueado_ate"].isoformat() + "Z" if rate_limit["bloqueado_ate"] else None,
+            "bloqueado_ate": utc_isoformat(rate_limit["bloqueado_ate"]) if rate_limit["bloqueado_ate"] else None,
         }), 429
 
-    if usuario != MEDICO_USER or senha != MEDICO_PASS:
+    password_hash = get_password_hash()
+    senha_valida = bool(password_hash) and check_password_hash(password_hash, senha)
+    if usuario != MEDICO_USER or not senha_valida:
         resultado_bloqueio = register_login_failure(
             rate_limit_key,
             max_tentativas=_MAX_LOGIN_ATTEMPTS,
@@ -236,13 +262,13 @@ def login():
         if resultado_bloqueio["bloqueado"]:
             return jsonify({
                 "erro": "Muitas tentativas de login. Tente novamente em alguns minutos.",
-                "bloqueado_ate": resultado_bloqueio["bloqueado_ate"].isoformat() + "Z" if resultado_bloqueio["bloqueado_ate"] else None,
+                "bloqueado_ate": utc_isoformat(resultado_bloqueio["bloqueado_ate"]) if resultado_bloqueio["bloqueado_ate"] else None,
             }), 429
         return jsonify({"erro": "Usuário ou senha incorretos"}), 401
 
     clear_login_failures(rate_limit_key)
 
-    expiracao = datetime.utcnow() + timedelta(hours=8)
+    expiracao = utc_now() + timedelta(hours=8)
     token = jwt.encode(
         {"usuario": usuario, "exp": expiracao},
         SECRET_KEY,
@@ -251,12 +277,10 @@ def login():
 
     return jsonify({
         "token": token,
-        "expira_em": expiracao.isoformat() + "Z",
+        "expira_em": utc_isoformat(expiracao),
         "usuario": usuario,
     })
 
-
-# ── Consultas ────────────────────────────────────────────────────────────────
 
 @api.route("/consultas/hoje", methods=["GET"])
 @token_required
@@ -265,7 +289,7 @@ def consultas_hoje():
     data_param = request.args.get("data")
 
     try:
-        data_referencia = datetime.strptime(data_param, "%Y-%m-%d").date() if data_param else date.today()
+        data_referencia = datetime.strptime(data_param, "%Y-%m-%d").date() if data_param else local_today()
     except ValueError:
         return jsonify({"erro": "Parâmetro 'data' inválido. Use YYYY-MM-DD."}), 400
 
@@ -280,13 +304,14 @@ def consultas_hoje():
         "consultas": consultas,
     })
 
+
 @api.route("/consultas/semana", methods=["GET"])
 @token_required
 def consultas_semana():
     inicio_param = request.args.get("inicio")
 
     try:
-        data_inicio = datetime.strptime(inicio_param, "%Y-%m-%d").date() if inicio_param else date.today()
+        data_inicio = datetime.strptime(inicio_param, "%Y-%m-%d").date() if inicio_param else local_today()
     except ValueError:
         return jsonify({"erro": "Parâmetro 'inicio' inválido. Use YYYY-MM-DD."}), 400
 
@@ -300,8 +325,8 @@ def consultas_semana():
     return jsonify({
         "inicio": data_inicio.isoformat(),
         "semana": [
-            {"data": data, "consultas": lista}
-            for data, lista in sorted(agrupado.items())
+            {"data": data_item, "consultas": lista}
+            for data_item, lista in sorted(agrupado.items())
         ]
     })
 
@@ -309,8 +334,14 @@ def consultas_semana():
 @api.route("/consultas/historico", methods=["GET"])
 @token_required
 def consultas_historico():
-    pagina = int(request.args.get("pagina", 1))
-    por_pagina = int(request.args.get("por_pagina", 20))
+    pagina, erro_pagina = parse_positive_int_arg("pagina", 1, minimum=1)
+    if erro_pagina:
+        return jsonify({"erro": erro_pagina}), 400
+
+    por_pagina, erro_por_pagina = parse_positive_int_arg("por_pagina", 20, minimum=1, maximum=_MAX_POR_PAGINA)
+    if erro_por_pagina:
+        return jsonify({"erro": erro_por_pagina}), 400
+
     offset = (pagina - 1) * por_pagina
 
     consultas = [limpar_row(c) for c in get_consultas_historico(limit=por_pagina, offset=offset)]
@@ -329,9 +360,6 @@ def consultas_historico():
 @api.route("/consultas/<int:consulta_id>/concluir", methods=["PATCH"])
 @token_required
 def concluir_consulta(consulta_id):
-    """
-    Marca uma consulta como concluída.
-    """
     sucesso = atualizar_status_consulta(consulta_id, "concluido")
     if not sucesso:
         return jsonify({"erro": "Consulta não encontrada"}), 404
@@ -345,10 +373,6 @@ def concluir_consulta(consulta_id):
 @api.route("/consultas/<int:consulta_id>/cancelar", methods=["PATCH"])
 @token_required
 def cancelar_consulta(consulta_id):
-    """
-    Cancela uma consulta.
-    Body opcional: { "motivo": "Paciente não compareceu" }
-    """
     dados = request.get_json() or {}
     motivo = dados.get("motivo", "Cancelado pelo painel")
 
@@ -366,11 +390,6 @@ def cancelar_consulta(consulta_id):
 @api.route("/consultas/<int:consulta_id>/confirmar-pagamento", methods=["PATCH"])
 @token_required
 def confirmar_pagamento(consulta_id):
-    """
-    Confirma o pagamento de uma consulta aguardando_pagamento → confirmado.
-    Envia mensagem de confirmação ao cliente via WhatsApp.
-    """
-    from database.consultas import atualizar_status_consulta
     from database.connection import get_db
     from services.whatsapp import send_recomendacoes_pre_consulta, send_whatsapp_message
 
@@ -380,7 +399,6 @@ def confirmar_pagamento(consulta_id):
     if not sucesso:
         return jsonify({"erro": "Consulta não encontrada"}), 404
 
-    # Busca telefone do cliente para notificar
     try:
         with get_db() as conn:
             cursor = conn.cursor(dictionary=True)
@@ -410,9 +428,8 @@ def confirmar_pagamento(consulta_id):
             if not envio_whatsapp_sucesso(resultado_recomendacoes):
                 notificacao_enviada = False
                 avisos.append("As recomendações pré-consulta não puderam ser enviadas ao paciente.")
-            # Atualiza estado do cliente para consulta_confirmada
             try:
-                from database.estados import set_estado, get_estado
+                from database.estados import get_estado, set_estado
                 _, dados_atuais = get_estado(row["telefone"])
                 dados_atuais["data"] = row["data"].isoformat() if hasattr(row["data"], "isoformat") else str(row["data"])
                 dados_atuais["horario"] = horario_fmt
@@ -441,7 +458,6 @@ def confirmar_pagamento(consulta_id):
 @api.route("/planos", methods=["GET"])
 @token_required
 def listar_planos():
-    """Retorna todos os planos ativos."""
     from database.consultas import buscar_planos_ativos
     planos = buscar_planos_ativos()
     return jsonify({"planos": [
@@ -455,8 +471,6 @@ def listar_planos():
         for p in planos
     ]})
 
-
-# ── Conversas (histórico WhatsApp) ───────────────────────────────────────────
 
 @api.route("/conversas/media/<media_id>", methods=["GET"])
 @token_required
@@ -475,7 +489,6 @@ def obter_midia_conversa(media_id):
 @api.route("/conversas", methods=["GET"])
 @token_required
 def listar_conversas():
-    """Lista todos os contatos com data da última mensagem e total."""
     rows = get_conversas_lista()
     resultado = []
     for r in rows:
@@ -486,13 +499,13 @@ def listar_conversas():
             except Exception:
                 ultimo_payload = None
         resultado.append({
-            "telefone":        r["telefone"],
-            "nome":            r["nome"] or r["telefone"],
+            "telefone": r["telefone"],
+            "nome": r["nome"] or r["telefone"],
             "ultima_mensagem": r["ultima_mensagem"].isoformat() if r["ultima_mensagem"] else None,
             "total_mensagens": r["total_mensagens"],
-            "ultimo_tipo":     r["ultimo_tipo"],
-            "ultimo_payload":  ultimo_payload,
-            "ultima_previa":   extrair_texto_payload(ultimo_payload, r["ultimo_tipo"]),
+            "ultimo_tipo": r["ultimo_tipo"],
+            "ultimo_payload": ultimo_payload,
+            "ultima_previa": extrair_texto_payload(ultimo_payload, r["ultimo_tipo"]),
         })
     return jsonify({"conversas": resultado})
 
@@ -500,7 +513,6 @@ def listar_conversas():
 @api.route("/conversas/<telefone>", methods=["GET"])
 @token_required
 def mensagens_por_telefone(telefone):
-    """Retorna todas as mensagens trocadas com um telefone específico."""
     rows = get_mensagens_por_telefone(telefone)
     mensagens = []
     for r in rows:
@@ -511,7 +523,6 @@ def mensagens_por_telefone(telefone):
             except Exception:
                 payload = r["payload"]
 
-        # Extrai texto legível do payload quando possível
         texto = None
         if payload:
             raw = (
@@ -529,22 +540,22 @@ def mensagens_por_telefone(telefone):
         sender_type = inferir_sender_type(r["status_envio"])
 
         mensagens.append({
-            "id":            r["id"],
-            "consulta_id":   r["consulta_id"],
-            "sender":        sender_type,
-            "senderType":    sender_type,
-            "direction":     "incoming" if sender_type == "client" else "outgoing",
+            "id": r["id"],
+            "consulta_id": r["consulta_id"],
+            "sender": sender_type,
+            "senderType": sender_type,
+            "direction": "incoming" if sender_type == "client" else "outgoing",
             "tipo_mensagem": r["tipo_mensagem"],
-            "message_id":    r["message_id"],
-            "status_envio":  r["status_envio"],
-            "texto":         extrair_texto_payload(payload, texto or r["tipo_mensagem"]),
-            "attachments":   extrair_anexos_payload(payload),
-            "payload":       payload,
-            "timestamp":     r["criado_em"].isoformat() if r["criado_em"] else None,
-            "criado_em":     r["criado_em"].isoformat() if r["criado_em"] else None,
+            "message_id": r["message_id"],
+            "status_envio": r["status_envio"],
+            "texto": extrair_texto_payload(payload, texto or r["tipo_mensagem"]),
+            "attachments": extrair_anexos_payload(payload),
+            "payload": payload,
+            "timestamp": r["criado_em"].isoformat() if r["criado_em"] else None,
+            "criado_em": r["criado_em"].isoformat() if r["criado_em"] else None,
         })
     return jsonify({
-        "telefone":  telefone,
+        "telefone": telefone,
         "mensagens": mensagens,
-        "total":     len(mensagens),
+        "total": len(mensagens),
     })

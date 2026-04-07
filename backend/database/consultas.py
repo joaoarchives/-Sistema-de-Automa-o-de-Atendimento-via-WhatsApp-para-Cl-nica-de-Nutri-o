@@ -1,9 +1,11 @@
-from datetime import date, timedelta, datetime
+﻿from datetime import date, timedelta
+
 from database.connection import get_db
 from utils.helpers import timedelta_para_hhmm
+from utils.time_utils import local_today, utc_now_naive
 
 
-# ── Funções do bot ────────────────────────────────────────────────────────────
+# ── Funções do bot ─────────────────────────────────────────────────────────────
 
 def buscar_horarios_ocupados(data: str) -> list[str]:
     with get_db() as conn:
@@ -59,7 +61,7 @@ def salvar_consulta(
     medico_id: int = 1,
 ) -> int:
     """Salva consulta com status aguardando_pagamento. Retorna o id gerado."""
-    expira_em = datetime.now() + timedelta(hours=1)
+    expira_em = utc_now_naive() + timedelta(hours=1)
     with get_db() as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -113,10 +115,10 @@ def buscar_plano_por_codigo(codigo: str) -> dict | None:
         return cursor.fetchone()
 
 
-# ── Funções do painel ─────────────────────────────────────────────────────────
+# ── Funções do painel ──────────────────────────────────────────────────────────
 
 def get_consultas_hoje(data_referencia=None):
-    data_referencia = data_referencia or date.today()
+    data_referencia = data_referencia or local_today()
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
         cursor.execute("""
@@ -142,7 +144,7 @@ def get_consultas_hoje(data_referencia=None):
 
 
 def get_consultas_semana(data_inicio=None):
-    data_inicio = data_inicio or date.today()
+    data_inicio = data_inicio or local_today()
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
         fim = data_inicio + timedelta(days=6)
@@ -166,7 +168,8 @@ def get_consultas_semana(data_inicio=None):
             ORDER BY c.data ASC, c.horario ASC
         """, (data_inicio, fim))
         return cursor.fetchall()
-    
+
+
 def get_total_consultas_historico():
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -177,6 +180,7 @@ def get_total_consultas_historico():
                        """)
         row = cursor.fetchone()
         return int(row["total"]) if row else 0
+
 
 def get_consultas_historico(limit=20, offset=0):
     with get_db() as conn:

@@ -1,4 +1,4 @@
-FROM node:20-alpine AS frontend-build
+﻿FROM node:20-alpine AS frontend-build
 # build v2
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
@@ -22,4 +22,4 @@ COPY --from=frontend-build /app/frontend/dist /app/frontend/dist
 
 WORKDIR /app/backend
 
-CMD ["sh", "-c", "gunicorn --bind 0.0.0.0:${PORT} app:app"]
+CMD ["sh", "-c", "if [ \"${APP_ROLE:-web}\" = \"scheduler\" ]; then python run_scheduler.py; else gunicorn --bind 0.0.0.0:${PORT} --workers ${WEB_CONCURRENCY:-1} --threads ${GUNICORN_THREADS:-4} --worker-class gthread --timeout ${GUNICORN_TIMEOUT:-120} app:app; fi"]

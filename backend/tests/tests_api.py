@@ -1,8 +1,9 @@
-from contextlib import contextmanager
+﻿from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 
 import jwt
 import pytest
+from werkzeug.security import generate_password_hash
 
 import api as api_module
 from app import app as flask_app
@@ -12,7 +13,8 @@ from app import app as flask_app
 def client(monkeypatch):
     monkeypatch.setattr(api_module, "SECRET_KEY", "segredo-de-teste-com-32-bytes-ok")
     monkeypatch.setattr(api_module, "MEDICO_USER", "drpaulo")
-    monkeypatch.setattr(api_module, "MEDICO_PASS", "senha123")
+    monkeypatch.setattr(api_module, "MEDICO_PASS_HASH", generate_password_hash("senha123"))
+    monkeypatch.setattr(api_module, "_LEGACY_PASSWORD_HASH", "")
     flask_app.config["TESTING"] = True
     return flask_app.test_client()
 
@@ -63,8 +65,22 @@ def test_login_invalido_registra_tentativa(client, monkeypatch):
     assert chamadas
 
 
+def test_historico_rejeita_pagina_invalida(client):
+    resposta = client.get("/api/consultas/historico?pagina=abc", headers=auth_headers())
+
+    assert resposta.status_code == 400
+    assert "pagina" in resposta.get_json()["erro"]
+
+
+def test_historico_rejeita_por_pagina_acima_do_limite(client):
+    resposta = client.get("/api/consultas/historico?por_pagina=9999", headers=auth_headers())
+
+    assert resposta.status_code == 400
+    assert "por_pagina" in resposta.get_json()["erro"]
+
+
 def test_confirmar_pagamento_retorna_aviso_quando_notificacao_falha(client, monkeypatch):
-    monkeypatch.setattr("database.consultas.atualizar_status_consulta", lambda consulta_id, status: True)
+    monkeypatch.setattr(api_module, "atualizar_status_consulta", lambda consulta_id, status: True)
 
     class FakeCursor:
         def execute(self, *args, **kwargs):

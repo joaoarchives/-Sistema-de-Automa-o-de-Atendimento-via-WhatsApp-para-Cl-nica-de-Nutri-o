@@ -1,8 +1,9 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 
 from database.connection import get_db
+from utils.time_utils import db_utc_to_aware, utc_now, utc_now_naive
 
 _TABLES_READY = False
 
@@ -55,8 +56,8 @@ def get_login_rate_limit(identificador: str) -> dict:
         row = cursor.fetchone()
 
     tentativas = int(row["tentativas"]) if row else 0
-    bloqueado_ate = row["bloqueado_ate"] if row else None
-    agora = datetime.utcnow()
+    bloqueado_ate = db_utc_to_aware(row["bloqueado_ate"]) if row else None
+    agora = utc_now()
     if bloqueado_ate and bloqueado_ate <= agora:
         clear_login_failures(identificador)
         return {
@@ -64,10 +65,10 @@ def get_login_rate_limit(identificador: str) -> dict:
             "bloqueado": False,
             "bloqueado_ate": None,
         }
-    bloqueado = bool(bloqueado_ate and bloqueado_ate > agora)
+
     return {
         "tentativas": tentativas,
-        "bloqueado": bloqueado,
+        "bloqueado": bool(bloqueado_ate and bloqueado_ate > agora),
         "bloqueado_ate": bloqueado_ate,
     }
 
@@ -82,9 +83,9 @@ def register_login_failure(
 
     status = get_login_rate_limit(identificador)
     tentativas = status["tentativas"] + 1
-    bloqueado_ate = None
+    bloqueado_ate_db = None
     if tentativas >= max_tentativas:
-        bloqueado_ate = datetime.utcnow() + timedelta(minutes=janela_bloqueio_minutos)
+        bloqueado_ate_db = utc_now_naive() + timedelta(minutes=janela_bloqueio_minutos)
 
     with get_db() as conn:
         cursor = conn.cursor()
@@ -96,13 +97,13 @@ def register_login_failure(
                 tentativas = VALUES(tentativas),
                 bloqueado_ate = VALUES(bloqueado_ate)
             """,
-            (identificador, tentativas, bloqueado_ate),
+            (identificador, tentativas, bloqueado_ate_db),
         )
 
     return {
         "tentativas": tentativas,
-        "bloqueado": bool(bloqueado_ate),
-        "bloqueado_ate": bloqueado_ate,
+        "bloqueado": bool(bloqueado_ate_db),
+        "bloqueado_ate": db_utc_to_aware(bloqueado_ate_db),
     }
 
 
