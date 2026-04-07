@@ -28,10 +28,10 @@ export default function Login() {
       <div style={styles.wrapper}>
         <form style={styles.card} onSubmit={handleSubmit}>
           <div style={styles.logoWrap}>
-            <div style={styles.logoDot} />
+            <img src="/brand-mark.png" alt="Paulo Jordão" style={styles.logoMark} />
           </div>
-          <h1 style={styles.titulo}>Clínica NutriVida</h1>
-          <p style={styles.sub}>Acesso restrito ao médico</p>
+          <h1 style={styles.titulo}>Paulo Jordão</h1>
+          <p style={styles.sub}>Painel do consultório</p>
 
           <div style={styles.fieldGroup}>
             <label style={styles.label}>Usuário</label>
@@ -91,13 +91,17 @@ const styles = {
   logoWrap: {
     width: 44,
     height: 44,
-    borderRadius: "50%",
-    background: "#1d3a2e",
-    border: "1px solid #00b37e44",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 4,
+  },
+  logoMark: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    objectFit: "cover",
+    boxShadow: "0 10px 22px rgba(0,0,0,0.28)",
   },
   logoDot: {
     width: 14,

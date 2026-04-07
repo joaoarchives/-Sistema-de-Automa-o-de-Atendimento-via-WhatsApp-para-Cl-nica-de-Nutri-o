@@ -20,7 +20,7 @@ export default function Layout() {
       <div style={styles.wrapper}>
         <aside style={styles.sidebar}>
           <div style={styles.logoWrap}>
-            <div style={styles.logoDot} />
+            <img src="/brand-mark.png" alt="Paulo Jordão" style={styles.logoMark} />
             <div>
               <div style={styles.logoTitle}>Paulo Jordão</div>
               <div style={styles.logoSub}>Nutrição & Performance</div>
@@ -82,6 +82,14 @@ const styles = {
     padding: "0 20px 20px",
     borderBottom: "0.5px solid #30363d",
     marginBottom: 8,
+  },
+  logoMark: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    objectFit: "cover",
+    flexShrink: 0,
+    boxShadow: "0 8px 18px rgba(0,0,0,0.28)",
   },
   logoDot: {
     width: 10,
