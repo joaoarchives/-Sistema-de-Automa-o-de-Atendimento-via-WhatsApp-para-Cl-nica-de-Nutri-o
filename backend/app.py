@@ -10,6 +10,7 @@ from flask_cors import CORS
 from services.bot_response import BotResponse
 from database.mensagens import atualizar_status_whatsapp, salvar_log_whatsapp
 from database.estados import get_estado
+from database.runtime_guards import register_processed_webhook_message
 from services.bot import processar_mensagem, processar_comprovante
 from services.whatsapp import send_whatsapp_message, send_whatsapp_interactive_list
 logging.basicConfig(
@@ -54,12 +55,6 @@ def verify_webhook():
 def receive_webhook():
     body = request.get_json(silent=True) or {}
 
-    # Cache de IDs já processados para evitar duplicatas (retries do WhatsApp)
-    _ids_processados = getattr(receive_webhook, '_ids_cache', set())
-    if len(_ids_processados) > 500:
-        _ids_processados.clear()
-    receive_webhook._ids_cache = _ids_processados
-
     try:
         entries = body.get("entry", [])
         for entry in entries:
@@ -71,12 +66,9 @@ def receive_webhook():
                     msg_type    = message.get("type")
                     msg_id      = message.get("id", "")
 
-                    # Ignora mensagens duplicadas (retries do WhatsApp)
-                    if msg_id and msg_id in _ids_processados:
+                    if msg_id and not register_processed_webhook_message(msg_id):
                         logger.info("Mensagem duplicada ignorada — id=%s", msg_id)
                         continue
-                    if msg_id:
-                        _ids_processados.add(msg_id)
 
                     logger.info("Mensagem recebida — de=%s tipo=%s id=%s", from_number, msg_type, msg_id)
 

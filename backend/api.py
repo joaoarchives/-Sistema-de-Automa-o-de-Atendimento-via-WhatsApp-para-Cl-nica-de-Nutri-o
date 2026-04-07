@@ -15,6 +15,7 @@ from database.consultas import (
     atualizar_status_consulta,
 )
 from database.mensagens import get_conversas_lista, get_mensagens_por_telefone, salvar_log_whatsapp
+from database.runtime_guards import clear_login_failures, get_login_rate_limit, register_login_failure
 api = Blueprint("api", __name__, url_prefix="/api")
 
 logger = logging.getLogger(__name__)
@@ -24,6 +25,8 @@ MEDICO_USER = os.getenv("MEDICO_USER", "").strip()
 MEDICO_PASS = os.getenv("MEDICO_PASS", "").strip()
 
 _SECRET_PLACEHOLDERS = {"", "chave_secreta", "dev_secret", "sua_chave_secreta", "secret"}
+_MAX_LOGIN_ATTEMPTS = int(os.getenv("LOGIN_MAX_TENTATIVAS", "5"))
+_LOGIN_BLOCK_MINUTES = int(os.getenv("LOGIN_BLOQUEIO_MINUTOS", "15"))
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -81,12 +84,23 @@ def inferir_sender_type(status_envio: str | None) -> str:
     return "client" if status_envio == "recebido" else "bot"
 
 
+def get_client_ip() -> str:
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return (request.remote_addr or "desconhecido").strip()
+
+
 def auth_configurada() -> bool:
     return (
         SECRET_KEY not in _SECRET_PLACEHOLDERS
         and bool(MEDICO_USER)
         and bool(MEDICO_PASS)
     )
+
+
+def login_rate_limit_key(usuario: str) -> str:
+    return f"{get_client_ip()}|{(usuario or '_anon_').lower()}"
 
 
 def registrar_envio_whatsapp(telefone: str, resultado: dict, tipo_mensagem: str | None = None) -> None:
@@ -108,6 +122,11 @@ def registrar_envio_whatsapp(telefone: str, resultado: dict, tipo_mensagem: str 
         payload=payload,
         resposta_api=response_data,
     )
+
+
+def envio_whatsapp_sucesso(resultado: dict) -> bool:
+    response_data = resultado.get("response", {}) if isinstance(resultado, dict) else {}
+    return bool(response_data.get("messages"))
 
 
 def inferir_file_type(file_name: str, mime_type: str | None, fallback: str) -> str:
@@ -200,8 +219,28 @@ def login():
     if not usuario or not senha:
         return jsonify({"erro": "Usuário e senha são obrigatórios"}), 400
 
+    rate_limit_key = login_rate_limit_key(usuario)
+    rate_limit = get_login_rate_limit(rate_limit_key)
+    if rate_limit["bloqueado"]:
+        return jsonify({
+            "erro": "Muitas tentativas de login. Tente novamente em alguns minutos.",
+            "bloqueado_ate": rate_limit["bloqueado_ate"].isoformat() + "Z" if rate_limit["bloqueado_ate"] else None,
+        }), 429
+
     if usuario != MEDICO_USER or senha != MEDICO_PASS:
+        resultado_bloqueio = register_login_failure(
+            rate_limit_key,
+            max_tentativas=_MAX_LOGIN_ATTEMPTS,
+            janela_bloqueio_minutos=_LOGIN_BLOCK_MINUTES,
+        )
+        if resultado_bloqueio["bloqueado"]:
+            return jsonify({
+                "erro": "Muitas tentativas de login. Tente novamente em alguns minutos.",
+                "bloqueado_ate": resultado_bloqueio["bloqueado_ate"].isoformat() + "Z" if resultado_bloqueio["bloqueado_ate"] else None,
+            }), 429
         return jsonify({"erro": "Usuário ou senha incorretos"}), 401
+
+    clear_login_failures(rate_limit_key)
 
     expiracao = datetime.utcnow() + timedelta(hours=8)
     token = jwt.encode(
@@ -336,6 +375,8 @@ def confirmar_pagamento(consulta_id):
     from services.whatsapp import send_recomendacoes_pre_consulta, send_whatsapp_message
 
     sucesso = atualizar_status_consulta(consulta_id, "confirmado")
+    avisos = []
+    notificacao_enviada = True
     if not sucesso:
         return jsonify({"erro": "Consulta não encontrada"}), 404
 
@@ -361,8 +402,14 @@ def confirmar_pagamento(consulta_id):
                 f"Qualquer dúvida, estamos à disposição. Até lá! 💪"
             )
             registrar_envio_whatsapp(row["telefone"], resultado_confirmacao, "texto")
+            if not envio_whatsapp_sucesso(resultado_confirmacao):
+                notificacao_enviada = False
+                avisos.append("A mensagem de confirmação não pôde ser enviada ao paciente.")
             resultado_recomendacoes = send_recomendacoes_pre_consulta(row["telefone"])
             registrar_envio_whatsapp(row["telefone"], resultado_recomendacoes, "texto")
+            if not envio_whatsapp_sucesso(resultado_recomendacoes):
+                notificacao_enviada = False
+                avisos.append("As recomendações pré-consulta não puderam ser enviadas ao paciente.")
             # Atualiza estado do cliente para consulta_confirmada
             try:
                 from database.estados import set_estado, get_estado
@@ -372,14 +419,22 @@ def confirmar_pagamento(consulta_id):
                 set_estado(row["telefone"], "consulta_confirmada", dados_atuais)
             except Exception:
                 logger.exception("Erro ao atualizar estado da conversa após confirmação do pagamento.")
+                notificacao_enviada = False
+                avisos.append("O estado da conversa não pôde ser atualizado após a confirmação.")
+        else:
+            notificacao_enviada = False
+            avisos.append("A consulta foi confirmada, mas o telefone do paciente não foi localizado para notificação.")
     except Exception:
         logger.exception("Erro ao notificar cliente após confirmação do pagamento.")
-        pass  # Não falha o endpoint se a notificação der erro
+        notificacao_enviada = False
+        avisos.append("A consulta foi confirmada, mas houve falha ao notificar o paciente.")
 
     return jsonify({
         "mensagem": "Pagamento confirmado",
         "id": consulta_id,
         "status": "confirmado",
+        "notificacao_enviada": notificacao_enviada,
+        "aviso": " ".join(dict.fromkeys(avisos)) if avisos else None,
     })
 
 

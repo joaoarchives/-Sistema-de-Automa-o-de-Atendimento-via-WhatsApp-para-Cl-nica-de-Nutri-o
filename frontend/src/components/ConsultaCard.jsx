@@ -41,8 +41,11 @@ export default function ConsultaCard({ consulta, onAtualizar }) {
   async function handleConfirmarPagamento() {
     if (!confirm(`Confirmar pagamento de ${consulta.nome}?`)) return;
     try {
-      await confirmarPagamento(consulta.id);
+      const resposta = await confirmarPagamento(consulta.id);
       onAtualizar();
+      if (resposta?.data?.aviso) {
+        alert(resposta.data.aviso);
+      }
     } catch {
       alert("Erro ao confirmar pagamento.");
     }

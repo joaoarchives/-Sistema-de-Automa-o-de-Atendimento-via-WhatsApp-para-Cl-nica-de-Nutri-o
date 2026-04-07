@@ -104,6 +104,25 @@ def init_db() -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
 
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS auth_login_attempts (
+                identificador   VARCHAR(255) NOT NULL,
+                tentativas      INT NOT NULL DEFAULT 0,
+                bloqueado_ate   DATETIME DEFAULT NULL,
+                atualizado_em   TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                                ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (identificador)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS webhook_dedup (
+                message_id      VARCHAR(255) NOT NULL,
+                criado_em       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                PRIMARY KEY (message_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        """)
+
         # Médico padrão
         cursor.execute("""
             INSERT INTO medicos (id, nome, telefone, ativo)
