@@ -77,7 +77,7 @@ export default function AgendaSemana() {
   const agrupado = agruparPorData(consultas);
 
   return (
-    <div>
+    <div style={styles.page}>
       <div style={{ ...styles.header, ...(isMobile ? styles.headerMobile : {}) }}>
         <div>
           <h2 style={styles.titulo}>Agenda da Semana</h2>
@@ -127,6 +127,12 @@ export default function AgendaSemana() {
 }
 
 const styles = {
+  page: {
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
+    overflowX: "clip",
+  },
   header: {
     display: "flex",
     justifyContent: "space-between",
@@ -144,6 +150,7 @@ const styles = {
   navSemanaMobile: {
     width: "100%",
     flexWrap: "wrap",
+    overflowX: "clip",
   },
   btn: {
     padding: "10px 14px",
@@ -156,8 +163,9 @@ const styles = {
     fontWeight: 500,
   },
   btnMobile: {
-    flex: "1 1 120px",
+    flex: "1 1 calc(50% - 8px)",
     minHeight: 44,
+    minWidth: 0,
   },
   btnHoje: { color: "#00b37e", borderColor: "#00b37e44" },
   grupo: { marginBottom: 28 },
@@ -196,5 +204,5 @@ const styles = {
   vazioMobile: {
     padding: "24px 16px",
   },
-  lista: { display: "flex", flexDirection: "column", gap: 8 },
+  lista: { display: "flex", flexDirection: "column", gap: 8, width: "100%", minWidth: 0 },
 };

@@ -69,7 +69,7 @@ function normalizarSenderType(mensagem) {
 
 function isTextoTecnico(valor) {
   const texto = String(valor || "").trim().toLowerCase();
-  return ["interactive", "lista", "list", "text", "texto"].includes(texto);
+  return ["interactive", "lista", "list", "text", "texto", "image", "document", "media"].includes(texto);
 }
 
 function extrairDisplayDoPayload(payload, fallbackMensagem = {}) {
@@ -126,9 +126,10 @@ function extrairDisplayDoPayload(payload, fallbackMensagem = {}) {
 }
 
 function melhorFallbackTexto(mensagem, senderType) {
+  if (mensagem?.attachments?.length) return "";
+
   const bruto = String(mensagem?.texto || "").trim();
   if (bruto && !isTextoTecnico(bruto)) return bruto;
-  if (mensagem?.attachments?.length) return "";
   if (mensagem?.tipo_mensagem === "document") return "Documento enviado";
   if (mensagem?.tipo_mensagem === "image") return "Imagem enviada";
   if (mensagem?.tipo_mensagem === "lista" && senderType === "bot") return "Lista enviada";
@@ -528,8 +529,13 @@ const s = {
   },
   pageMobile: {
     display: "block",
-    margin: -16,
+    marginLeft: -16,
+    marginRight: -16,
+    marginBottom: -16,
+    marginTop: 0,
     minHeight: "calc(100dvh - 32px)",
+    paddingTop: "max(8px, env(safe-area-inset-top, 0px))",
+    overflowX: "hidden",
   },
   sidebar: {
     width: 330,
@@ -676,7 +682,7 @@ const s = {
   },
   chatMobile: {
     width: "100%",
-    minHeight: "calc(100dvh - 32px)",
+    minHeight: "calc(100dvh - 40px - env(safe-area-inset-top, 0px))",
   },
   chatHeader: {
     display: "flex",
@@ -687,7 +693,7 @@ const s = {
     borderBottom: "1px solid #283445",
   },
   chatHeaderMobile: {
-    padding: "14px 16px",
+    padding: "18px 16px 14px",
   },
   backButton: {
     width: 38,

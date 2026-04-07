@@ -102,6 +102,8 @@ const styles = {
   wrapper: {
     display: "flex",
     minHeight: "100vh",
+    width: "100%",
+    maxWidth: "100%",
     background: "#0d1117",
     color: "#e6edf3",
     position: "relative",
@@ -204,6 +206,8 @@ const styles = {
   main: {
     flex: 1,
     minWidth: 0,
+    width: "100%",
+    maxWidth: "100%",
     display: "flex",
     flexDirection: "column",
     background: "#0d1117",
@@ -249,6 +253,9 @@ const styles = {
   },
   content: {
     flex: 1,
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
     overflowY: "auto",
     overflowX: "hidden",
     padding: 32,

@@ -118,6 +118,9 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: 16,
+    width: "100%",
+    maxWidth: "100%",
+    minWidth: 0,
     background: "#161b22",
     border: "0.5px solid #30363d",
     borderRadius: 10,
@@ -153,6 +156,7 @@ const styles = {
   acoesMobile: {
     width: "100%",
     alignItems: "stretch",
+    minWidth: 0,
   },
   badge: {
     fontSize: 11,
@@ -192,7 +196,7 @@ const styles = {
   },
   btnMobile: {
     minHeight: 42,
-    flex: "1 1 150px",
-    justifyContent: "center",
+    flex: "1 1 100%",
+    minWidth: 0,
   },
 };
