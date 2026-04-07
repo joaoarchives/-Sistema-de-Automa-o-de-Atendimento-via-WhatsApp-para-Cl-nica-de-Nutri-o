@@ -1,4 +1,4 @@
-"""
+﻿"""
 Fluxo de conversa do bot.
 
 Estados:
@@ -10,12 +10,12 @@ Regras de negócio  → agendamento_service.py
 Persistência       → database/estados.py
 IA                 → services/gemini.py
 """
-from datetime import date, datetime
+from datetime import datetime
 
 from services.bot_response import BotResponse
 from database.mensagens import salvar_log_whatsapp
 from database.clientes import registrar_cliente_se_nao_existir
-from database.consultas import buscar_periodo_do_dia, buscar_planos_ativos, buscar_plano_por_codigo
+from database.consultas import buscar_periodo_do_dia, buscar_planos_ativos
 from database.estados import get_estado, set_estado
 from services.agendamento_service import (
     ResultadoAgendamento,
@@ -23,7 +23,7 @@ from services.agendamento_service import (
     cancelar_consulta,
     confirmar_agendamento,
 )
-from services.gemini import interpretar_data, responder_livre, detectar_intencao
+from services.gemini import detectar_intencao, interpretar_data, responder_livre
 from services.whatsapp import (
     get_pdf_planos_url,
     send_localizacao_clinica,
@@ -32,6 +32,7 @@ from services.whatsapp import (
     send_whatsapp_message,
 )
 from utils.helpers import data_valida, formatar_data_br, formatar_data_iso
+from utils.time_utils import local_today
 
 import logging
 logger = logging.getLogger(__name__)
@@ -55,13 +56,12 @@ _BOAS_VINDAS = (
 
 _DIAS_PT = {
     0: "segunda-feira", 1: "terça-feira", 2: "quarta-feira",
-    3: "quinta-feira",  4: "sexta-feira", 5: "sábado", 6: "domingo",
+    3: "quinta-feira", 4: "sexta-feira", 5: "sábado", 6: "domingo",
 }
 
 _SIM = {"sim", "s", "yes", "1", "ok", "isso", "correto", "certo", "exato", "confirmado"}
 _NAO = {"não", "nao", "n", "no", "2", "errado", "incorreto", "outro", "outra", "negativo"}
 
-# Mensagens de agradecimento/encerramento que não precisam de resposta do fluxo
 _AGRADECIMENTOS = {
     "obrigado", "obrigada", "obg", "valeu", "vlw", "muito obrigado", "muito obrigada",
     "ta bom", "tá bom", "ta ótimo", "tá ótimo", "ok obrigado", "ok obrigada",
@@ -73,6 +73,7 @@ _PERIODO_LABEL = {
     "manha": "manhã (09:00 às 12:00)",
     "tarde": "tarde (16:00 às 19:00)",
 }
+
 
 def _registrar_envio_whatsapp(telefone: str, resultado: dict, tipo_mensagem: str | None = None) -> None:
     response_data = resultado.get("response", {}) if isinstance(resultado, dict) else {}
@@ -126,25 +127,18 @@ def _nome_dia(data_iso: str) -> str:
 
 
 def _hoje_str() -> str:
-    return date.today().strftime("%d/%m/%Y")
+    return local_today().strftime("%d/%m/%Y")
 
 
 def _hoje_nome() -> str:
-    return _DIAS_PT[date.today().weekday()]
+    return _DIAS_PT[local_today().weekday()]
 
-
-# ──────────────────────────────────────────────
-# Handlers
-# ──────────────────────────────────────────────
 
 def _handle_boas_vindas(telefone: str, mensagem: str, dados: dict) -> BotResponse:
-    """Estado após a saudação inicial. Usa Gemini para detectar intenção."""
-
     if mensagem in _SAUDACOES:
         _enviar_boas_vindas(telefone)
         return BotResponse(texto="")
 
-    # Agradecimento/encerramento — responde e mantém no estado
     if mensagem in _AGRADECIMENTOS:
         set_estado(telefone, "boas_vindas", dados)
         return BotResponse(texto=(
@@ -165,7 +159,6 @@ def _handle_boas_vindas(telefone: str, mensagem: str, dados: dict) -> BotRespons
             "Até logo! 😊"
         ))
 
-    # Dúvida livre — Gemini responde e mantém no estado boas_vindas
     resposta_gemini = responder_livre(mensagem)
     set_estado(telefone, "boas_vindas", dados)
     return BotResponse(texto=(
@@ -180,32 +173,32 @@ def _handle_menu(telefone: str, mensagem: str, dados: dict) -> BotResponse:
         planos = buscar_planos_ativos()
         set_estado(telefone, "plano", {"planos": [p["codigo"] for p in planos]})
 
-        _NOMES_CURTOS = {
-            "nutri_consulta_unica":   "Consulta Completa",
-            "nutri_trimestral":       "Trimestral Premium",
-            "nutri_semestral":        "Semestral Alta Perf.",
-            "nutri_grupo_1amigo":     "Grupo — 1 amigo",
-            "nutri_grupo_2amigos":    "Grupo — 2 amigos",
-            "treino_consulta_unica":  "Consulta + Treino",
-            "treino_trimestral":      "Trimestral + Treino",
-            "treino_semestral":       "Semestral + Treino",
-            "treino_grupo_1amigo":    "Grupo+Treino 1 amigo",
-            "treino_grupo_2amigos":   "Grupo+Treino 2 amigos",
+        nomes_curtos = {
+            "nutri_consulta_unica": "Consulta Completa",
+            "nutri_trimestral": "Trimestral Premium",
+            "nutri_semestral": "Semestral Alta Perf.",
+            "nutri_grupo_1amigo": "Grupo — 1 amigo",
+            "nutri_grupo_2amigos": "Grupo — 2 amigos",
+            "treino_consulta_unica": "Consulta + Treino",
+            "treino_trimestral": "Trimestral + Treino",
+            "treino_semestral": "Semestral + Treino",
+            "treino_grupo_1amigo": "Grupo+Treino 1 amigo",
+            "treino_grupo_2amigos": "Grupo+Treino 2 amigos",
         }
 
-        nutri  = [p for p in planos if not p["codigo"].startswith("treino")]
+        nutri = [p for p in planos if not p["codigo"].startswith("treino")]
         treino = [p for p in planos if p["codigo"].startswith("treino")]
 
         secoes = []
         if nutri:
             secoes.append({
                 "title": "Só Nutrição",
-                "rows": [{"id": p["codigo"], "title": _NOMES_CURTOS.get(p["codigo"], p["nome"][:24])} for p in nutri],
+                "rows": [{"id": p["codigo"], "title": nomes_curtos.get(p["codigo"], p["nome"][:24])} for p in nutri],
             })
         if treino:
             secoes.append({
                 "title": "Nutrição + Treino",
-                "rows": [{"id": p["codigo"], "title": _NOMES_CURTOS.get(p["codigo"], p["nome"][:24])} for p in treino],
+                "rows": [{"id": p["codigo"], "title": nomes_curtos.get(p["codigo"], p["nome"][:24])} for p in treino],
             })
 
         return BotResponse(
@@ -231,9 +224,9 @@ def _handle_plano(telefone: str, mensagem: str, dados: dict) -> BotResponse:
     planos = buscar_planos_ativos()
 
     plano_escolhido = None
-    for p in planos:
-        if mensagem == p["codigo"]:
-            plano_escolhido = p
+    for plano in planos:
+        if mensagem == plano["codigo"]:
+            plano_escolhido = plano
             break
 
     if not plano_escolhido and mensagem.isdigit():
@@ -245,7 +238,7 @@ def _handle_plano(telefone: str, mensagem: str, dados: dict) -> BotResponse:
         return BotResponse(texto="Opção inválida. Por favor, selecione um plano da lista.")
 
     dados["plano_codigo"] = plano_escolhido["codigo"]
-    dados["plano_nome"]   = plano_escolhido["nome"]
+    dados["plano_nome"] = plano_escolhido["nome"]
     dados["plano_adiant"] = float(plano_escolhido["valor_adiantamento"])
     set_estado(telefone, "tipo_consulta", dados)
 
@@ -290,7 +283,7 @@ def _handle_tipo_consulta(telefone: str, mensagem: str, dados: dict) -> BotRespo
 def _handle_data(telefone: str, mensagem: str, dados: dict) -> BotResponse:
     if data_valida(mensagem):
         data_iso = formatar_data_iso(mensagem)
-        data_br  = mensagem[:5]
+        data_br = mensagem[:5]
         nome_dia = _nome_dia(data_iso)
         dados.update({"data_sugerida": data_iso, "data_br": data_br, "nome_dia": nome_dia})
         set_estado(telefone, "confirmar_data", dados)
@@ -300,7 +293,7 @@ def _handle_data(telefone: str, mensagem: str, dados: dict) -> BotResponse:
     if not resultado.get("sucesso"):
         return BotResponse(texto="Não consegui entender a data. Pode escrever no formato DD/MM? Exemplo: 15/04.")
 
-    data_br  = resultado["data"][:5]
+    data_br = resultado["data"][:5]
     data_iso = formatar_data_iso(data_br)
     nome_dia = _nome_dia(data_iso)
     dados.update({"data_sugerida": data_iso, "data_br": data_br, "nome_dia": nome_dia})
@@ -329,8 +322,8 @@ def _handle_confirmar_data(telefone: str, mensagem: str, dados: dict) -> BotResp
     dados.pop("data_br", None)
     dados.pop("nome_dia", None)
 
-    tipo_consulta  = dados["tipo_consulta"]
-    periodo_ativo  = buscar_periodo_do_dia(dados["data"])
+    tipo_consulta = dados["tipo_consulta"]
+    periodo_ativo = buscar_periodo_do_dia(dados["data"])
 
     if periodo_ativo:
         dados["periodo"] = periodo_ativo
@@ -349,20 +342,19 @@ def _handle_confirmar_data(telefone: str, mensagem: str, dados: dict) -> BotResp
         set_estado(telefone, "horario", dados)
         return BotResponse(texto=f"As consultas desse dia são no período da {label}. Selecione um horário: ⏰")
 
-    else:
-        set_estado(telefone, "periodo_livre", dados)
-        return BotResponse(
-            texto="Qual período você prefere? ☀️🌙",
-            tipo="lista",
-            lista_botao="Selecionar período",
-            lista_secoes=[{
-                "title": "Período disponível",
-                "rows": [
-                    {"id": "1", "title": "Manhã (09:00 às 12:00)"},
-                    {"id": "2", "title": "Tarde (16:00 às 19:00)"},
-                ],
-            }],
-        )
+    set_estado(telefone, "periodo_livre", dados)
+    return BotResponse(
+        texto="Qual período você prefere? ☀️🌙",
+        tipo="lista",
+        lista_botao="Selecionar período",
+        lista_secoes=[{
+            "title": "Período disponível",
+            "rows": [
+                {"id": "1", "title": "Manhã (09:00 às 12:00)"},
+                {"id": "2", "title": "Tarde (16:00 às 19:00)"},
+            ],
+        }],
+    )
 
 
 def _handle_periodo_livre(telefone: str, mensagem: str, dados: dict) -> BotResponse:
@@ -522,13 +514,12 @@ def _handle_confirmacao(telefone: str, mensagem: str, dados: dict) -> BotRespons
         resultado_localizacao = send_localizacao_clinica(telefone)
         _registrar_envio_whatsapp(telefone, resultado_localizacao, "texto")
     except Exception:
-        logger.exception("Erro ao enviar instruções finais do agendamento — telefone=%s", telefone)
+        logger.exception("Erro ao enviar instruções finais do agendamento - telefone=%s", telefone)
 
     return BotResponse(texto="")
 
 
 def _handle_aguardando_comprovante(telefone: str, mensagem: str, dados: dict) -> BotResponse:
-    # Agradecimento enquanto aguarda — não repete a instrução
     if mensagem in _AGRADECIMENTOS:
         return BotResponse(texto="De nada! 😊 Assim que o Dr. Paulo confirmar o pagamento, você receberá uma mensagem.")
 
@@ -539,12 +530,9 @@ def _handle_aguardando_comprovante(telefone: str, mensagem: str, dados: dict) ->
 
 
 def _handle_pagamento_em_analise(telefone: str, mensagem: str, dados: dict) -> BotResponse:
-    """Aguardando confirmação do pagamento pelo médico."""
-
     intencao = detectar_intencao(mensagem)
 
     if intencao == "recusar":
-        # Despedida ou agradecimento — responde com educação
         return BotResponse(texto=(
             "De nada! 😊 Fico feliz em poder ajudar.\n\n"
             "Assim que o Dr. Paulo confirmar o pagamento, você receberá uma mensagem. "
@@ -552,14 +540,12 @@ def _handle_pagamento_em_analise(telefone: str, mensagem: str, dados: dict) -> B
         ))
 
     if intencao == "agendar":
-        # Cliente quer agendar outra consulta
         return BotResponse(texto=(
             "Seu comprovante está em análise. 🙏\n\n"
             "Assim que o pagamento for confirmado, ficará tudo certo! "
             "Caso queira agendar outra consulta, é só nos contatar depois."
         ))
 
-    # Dúvida — Gemini responde mas mantém no estado
     resposta_gemini = responder_livre(mensagem)
     set_estado(telefone, "pagamento_em_analise", dados)
     return BotResponse(texto=(
@@ -567,7 +553,6 @@ def _handle_pagamento_em_analise(telefone: str, mensagem: str, dados: dict) -> B
         "Lembrando que seu comprovante está em análise. "
         "Assim que o Dr. Paulo confirmar, você receberá uma mensagem. 🙏"
     ))
-
 
 
 _REAGENDAR = {
@@ -579,8 +564,6 @@ _REAGENDAR = {
 
 
 def _handle_consulta_confirmada(telefone: str, mensagem: str, dados: dict) -> BotResponse:
-    """Estado após pagamento confirmado pelo médico."""
-
     if mensagem in _AGRADECIMENTOS:
         set_estado(telefone, "consulta_confirmada", dados)
         return BotResponse(texto="De nada! 😊 Até o dia da consulta! 💪")
@@ -620,7 +603,6 @@ def _handle_consulta_confirmada(telefone: str, mensagem: str, dados: dict) -> Bo
         set_estado(telefone, "consulta_confirmada", dados)
         return BotResponse(texto="Até logo! Se precisar de algo, é só chamar. 😊")
 
-    # Dúvida livre — Gemini responde com contexto da consulta
     data_fmt = formatar_data_br(dados.get("data", "")) if dados.get("data") else ""
     horario_fmt = dados.get("horario", "")
     contexto = mensagem
@@ -636,30 +618,25 @@ def _handle_consulta_confirmada(telefone: str, mensagem: str, dados: dict) -> Bo
     return BotResponse(texto=resposta_gemini)
 
 
-# ──────────────────────────────────────────────
-# Dispatcher principal
-# ──────────────────────────────────────────────
-
 _HANDLERS = {
-    "boas_vindas":             _handle_boas_vindas,
-    "menu":                    _handle_menu,
-    "plano":                   _handle_plano,
-    "tipo_consulta":           _handle_tipo_consulta,
-    "data":                    _handle_data,
-    "confirmar_data":          _handle_confirmar_data,
-    "periodo_livre":           _handle_periodo_livre,
-    "horario":                 _handle_horario,
-    "nome":                    _handle_nome,
-    "sexo":                    _handle_sexo,
-    "confirmacao":             _handle_confirmacao,
-    "aguardando_comprovante":  _handle_aguardando_comprovante,
-    "pagamento_em_analise":    _handle_pagamento_em_analise,
-    "consulta_confirmada":     _handle_consulta_confirmada,
+    "boas_vindas": _handle_boas_vindas,
+    "menu": _handle_menu,
+    "plano": _handle_plano,
+    "tipo_consulta": _handle_tipo_consulta,
+    "data": _handle_data,
+    "confirmar_data": _handle_confirmar_data,
+    "periodo_livre": _handle_periodo_livre,
+    "horario": _handle_horario,
+    "nome": _handle_nome,
+    "sexo": _handle_sexo,
+    "confirmacao": _handle_confirmacao,
+    "aguardando_comprovante": _handle_aguardando_comprovante,
+    "pagamento_em_analise": _handle_pagamento_em_analise,
+    "consulta_confirmada": _handle_consulta_confirmada,
 }
 
 
 def processar_comprovante(telefone: str) -> BotResponse:
-    """Chamado quando o webhook recebe uma imagem ou PDF do cliente."""
     _, dados = get_estado(telefone)
     set_estado(telefone, "pagamento_em_analise", dados)
     return BotResponse(texto=(
@@ -691,7 +668,6 @@ def processar_mensagem(telefone: str, mensagem: str) -> BotResponse:
     mensagem_handler = mensagem_original if estado == "nome" else mensagem
     resposta = handler(telefone, mensagem_handler, dados)
 
-    # Se passou para estado "horario", devolve lista interativa clicável
     novo_estado, novo_dados = get_estado(telefone)
     if novo_estado == "horario" and novo_dados.get("horarios_disponiveis"):
         horarios = novo_dados["horarios_disponiveis"]
@@ -701,7 +677,7 @@ def processar_mensagem(telefone: str, mensagem: str) -> BotResponse:
             lista_botao="Ver horários",
             lista_secoes=[{
                 "title": "Horários disponíveis",
-                "rows": [{"id": h, "title": h} for h in horarios],
+                "rows": [{"id": horario, "title": horario} for horario in horarios],
             }],
         )
 

@@ -10,11 +10,14 @@ from utils.time_utils import local_today, utc_now_naive
 def buscar_horarios_ocupados(data: str) -> list[str]:
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT horario FROM consultas
             WHERE data = %s
               AND status IN ('aguardando_pagamento', 'confirmado')
-        """, (data,))
+            """,
+            (data,),
+        )
         return [timedelta_para_hhmm(row["horario"]) for row in cursor.fetchall()]
 
 
@@ -26,12 +29,15 @@ def buscar_periodo_do_dia(data: str) -> str | None:
     """
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT horario FROM consultas
             WHERE data = %s
               AND status IN ('aguardando_pagamento', 'confirmado')
             ORDER BY id ASC LIMIT 1
-        """, (data,))
+            """,
+            (data,),
+        )
         row = cursor.fetchone()
     if not row:
         return None
@@ -43,12 +49,15 @@ def buscar_periodo_do_dia(data: str) -> str | None:
 def horario_esta_disponivel(data: str, horario: str) -> bool:
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id FROM consultas
             WHERE data = %s AND horario = %s
               AND status IN ('aguardando_pagamento', 'confirmado')
             LIMIT 1
-        """, (data, f"{horario}:00"))
+            """,
+            (data, f"{horario}:00"),
+        )
         return cursor.fetchone() is None
 
 
@@ -64,33 +73,45 @@ def salvar_consulta(
     expira_em = utc_now_naive() + timedelta(hours=1)
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
+        cursor.execute(
+            """
             INSERT INTO consultas
                 (cliente_id, plano_id, tipo_consulta, data, horario,
                  status, pagamento_expira_em, medico_id)
             SELECT id, %s, %s, %s, %s, 'aguardando_pagamento', %s, %s
             FROM clientes WHERE telefone = %s
-        """, (plano_id, tipo_consulta, data, f"{horario}:00",
-              expira_em, medico_id, telefone))
+            """,
+            (plano_id, tipo_consulta, data, f"{horario}:00", expira_em, medico_id, telefone),
+        )
         return cursor.lastrowid
 
 
-def cancelar_ultima_consulta(telefone: str) -> bool:
+def cancelar_ultima_consulta(telefone: str, motivo: str = "Cancelado pelo paciente via WhatsApp") -> bool:
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT c.id FROM consultas c
             JOIN clientes cli ON cli.id = c.cliente_id
             WHERE cli.telefone = %s
               AND c.status IN ('aguardando_pagamento', 'confirmado')
             ORDER BY c.id DESC LIMIT 1
-        """, (telefone,))
+            """,
+            (telefone,),
+        )
         row = cursor.fetchone()
         if not row:
             return False
         cursor.execute(
-            "UPDATE consultas SET status = 'cancelado' WHERE id = %s",
-            (row["id"],)
+            """
+            UPDATE consultas
+            SET status = 'cancelado',
+                motivo_cancelamento = %s,
+                pagamento_notificacao_em_andamento = 0,
+                pagamento_notificacao_lock_em = NULL
+            WHERE id = %s
+            """,
+            (motivo, row["id"]),
         )
         return True
 
@@ -98,20 +119,25 @@ def cancelar_ultima_consulta(telefone: str) -> bool:
 def buscar_planos_ativos() -> list[dict]:
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, codigo, nome, valor_total, valor_adiantamento
             FROM planos WHERE ativo = 1 ORDER BY id
-        """)
+            """
+        )
         return cursor.fetchall()
 
 
 def buscar_plano_por_codigo(codigo: str) -> dict | None:
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT id, codigo, nome, valor_total, valor_adiantamento
             FROM planos WHERE codigo = %s AND ativo = 1
-        """, (codigo,))
+            """,
+            (codigo,),
+        )
         return cursor.fetchone()
 
 
@@ -121,25 +147,29 @@ def get_consultas_hoje(data_referencia=None):
     data_referencia = data_referencia or local_today()
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT
                 c.id,
                 cl.nome,
                 cl.sexo,
                 cl.telefone,
                 c.tipo_consulta,
-                p.nome      AS plano,
+                p.nome AS plano,
                 c.data,
                 CAST(c.horario AS CHAR) AS horario,
                 c.status,
-                m.nome      AS medico
+                c.motivo_cancelamento,
+                m.nome AS medico
             FROM consultas c
             JOIN clientes cl ON cl.id = c.cliente_id
             JOIN medicos  m  ON m.id  = c.medico_id
             LEFT JOIN planos p ON p.id = c.plano_id
             WHERE c.data = %s
             ORDER BY c.horario ASC
-        """, (data_referencia,))
+            """,
+            (data_referencia,),
+        )
         return cursor.fetchall()
 
 
@@ -148,36 +178,42 @@ def get_consultas_semana(data_inicio=None):
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
         fim = data_inicio + timedelta(days=6)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT
                 c.id,
                 cl.nome,
                 cl.sexo,
                 cl.telefone,
                 c.tipo_consulta,
-                p.nome      AS plano,
+                p.nome AS plano,
                 c.data,
                 CAST(c.horario AS CHAR) AS horario,
                 c.status,
-                m.nome      AS medico
+                c.motivo_cancelamento,
+                m.nome AS medico
             FROM consultas c
             JOIN clientes cl ON cl.id = c.cliente_id
             JOIN medicos  m  ON m.id  = c.medico_id
             LEFT JOIN planos p ON p.id = c.plano_id
             WHERE c.data BETWEEN %s AND %s
             ORDER BY c.data ASC, c.horario ASC
-        """, (data_inicio, fim))
+            """,
+            (data_inicio, fim),
+        )
         return cursor.fetchall()
 
 
 def get_total_consultas_historico():
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
-                       SELECT COUNT(*) AS total
-                       FROM consultas
-                       WHERE status IN ('concluido', 'cancelado')
-                       """)
+        cursor.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM consultas
+            WHERE status IN ('concluido', 'cancelado')
+            """
+        )
         row = cursor.fetchone()
         return int(row["total"]) if row else 0
 
@@ -185,18 +221,20 @@ def get_total_consultas_historico():
 def get_consultas_historico(limit=20, offset=0):
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("""
+        cursor.execute(
+            """
             SELECT
                 c.id,
                 cl.nome,
                 cl.sexo,
                 cl.telefone,
                 c.tipo_consulta,
-                p.nome      AS plano,
+                p.nome AS plano,
                 c.data,
                 CAST(c.horario AS CHAR) AS horario,
                 c.status,
-                m.nome      AS medico
+                c.motivo_cancelamento,
+                m.nome AS medico
             FROM consultas c
             JOIN clientes cl ON cl.id = c.cliente_id
             JOIN medicos  m  ON m.id  = c.medico_id
@@ -204,18 +242,39 @@ def get_consultas_historico(limit=20, offset=0):
             WHERE c.status IN ('concluido', 'cancelado')
             ORDER BY c.data DESC, c.horario DESC
             LIMIT %s OFFSET %s
-        """, (limit, offset))
+            """,
+            (limit, offset),
+        )
         rows = cursor.fetchall()
         for row in rows:
-            if 'data' in row and hasattr(row['data'], 'isoformat'):
-                row['data'] = row['data'].isoformat()
+            if "data" in row and hasattr(row["data"], "isoformat"):
+                row["data"] = row["data"].isoformat()
         return rows
 
 
 def atualizar_status_consulta(consulta_id: int, novo_status: str, motivo: str | None = None) -> bool:
     with get_db() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE consultas SET status = %s WHERE id = %s
-        """, (novo_status, consulta_id))
+        if novo_status == "cancelado":
+            cursor.execute(
+                """
+                UPDATE consultas
+                SET status = %s,
+                    motivo_cancelamento = %s,
+                    pagamento_notificacao_em_andamento = 0,
+                    pagamento_notificacao_lock_em = NULL
+                WHERE id = %s
+                """,
+                (novo_status, motivo, consulta_id),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE consultas
+                SET status = %s,
+                    motivo_cancelamento = NULL
+                WHERE id = %s
+                """,
+                (novo_status, consulta_id),
+            )
         return cursor.rowcount > 0

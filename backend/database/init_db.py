@@ -1,9 +1,30 @@
-import logging
+﻿import logging
 
+from config.settings import Config
 from database.connection import get_db
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _column_exists(cursor, table_name: str, column_name: str) -> bool:
+    cursor.execute(
+        """
+        SELECT 1
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = %s
+          AND TABLE_NAME = %s
+          AND COLUMN_NAME = %s
+        LIMIT 1
+        """,
+        (Config.DB_NAME, table_name, column_name),
+    )
+    return cursor.fetchone() is not None
+
+
+def _ensure_column(cursor, table_name: str, column_name: str, ddl: str) -> None:
+    if not _column_exists(cursor, table_name, column_name):
+        cursor.execute(ddl)
 
 
 def init_db() -> None:
@@ -47,21 +68,27 @@ def init_db() -> None:
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS consultas (
-                id                  INT  NOT NULL AUTO_INCREMENT,
-                cliente_id          INT  NOT NULL,
-                plano_id            INT  DEFAULT NULL,
-                tipo_consulta       ENUM('primeira_consulta', 'retorno') NOT NULL,
-                data                DATE NOT NULL,
-                horario             TIME NOT NULL,
-                status              ENUM(
-                                        'aguardando_pagamento',
-                                        'confirmado',
-                                        'cancelado',
-                                        'concluido'
-                                    ) NOT NULL DEFAULT 'aguardando_pagamento',
-                pagamento_expira_em DATETIME    DEFAULT NULL,
-                lembrete_enviado    TINYINT(1)  NOT NULL DEFAULT 0,
-                medico_id           INT  NOT NULL DEFAULT 1,
+                id                                   INT  NOT NULL AUTO_INCREMENT,
+                cliente_id                           INT  NOT NULL,
+                plano_id                             INT  DEFAULT NULL,
+                tipo_consulta                        ENUM('primeira_consulta', 'retorno') NOT NULL,
+                data                                 DATE NOT NULL,
+                horario                              TIME NOT NULL,
+                status                               ENUM(
+                                                        'aguardando_pagamento',
+                                                        'confirmado',
+                                                        'cancelado',
+                                                        'concluido'
+                                                    ) NOT NULL DEFAULT 'aguardando_pagamento',
+                pagamento_expira_em                  DATETIME    DEFAULT NULL,
+                pagamento_confirmado_em              DATETIME    DEFAULT NULL,
+                motivo_cancelamento                  TEXT        DEFAULT NULL,
+                pagamento_notificacao_em_andamento   TINYINT(1)  NOT NULL DEFAULT 0,
+                pagamento_notificacao_lock_em        DATETIME    DEFAULT NULL,
+                confirmacao_whatsapp_enviada_em      DATETIME    DEFAULT NULL,
+                recomendacoes_whatsapp_enviadas_em   DATETIME    DEFAULT NULL,
+                lembrete_enviado                     TINYINT(1)  NOT NULL DEFAULT 0,
+                medico_id                            INT  NOT NULL DEFAULT 1,
                 PRIMARY KEY (id),
                 KEY fk_consultas_cliente (cliente_id),
                 KEY fk_consultas_medico  (medico_id),
@@ -74,6 +101,13 @@ def init_db() -> None:
                     FOREIGN KEY (plano_id)   REFERENCES planos (id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
+
+        _ensure_column(cursor, "consultas", "motivo_cancelamento", "ALTER TABLE consultas ADD COLUMN motivo_cancelamento TEXT DEFAULT NULL")
+        _ensure_column(cursor, "consultas", "pagamento_confirmado_em", "ALTER TABLE consultas ADD COLUMN pagamento_confirmado_em DATETIME DEFAULT NULL")
+        _ensure_column(cursor, "consultas", "pagamento_notificacao_em_andamento", "ALTER TABLE consultas ADD COLUMN pagamento_notificacao_em_andamento TINYINT(1) NOT NULL DEFAULT 0")
+        _ensure_column(cursor, "consultas", "pagamento_notificacao_lock_em", "ALTER TABLE consultas ADD COLUMN pagamento_notificacao_lock_em DATETIME DEFAULT NULL")
+        _ensure_column(cursor, "consultas", "confirmacao_whatsapp_enviada_em", "ALTER TABLE consultas ADD COLUMN confirmacao_whatsapp_enviada_em DATETIME DEFAULT NULL")
+        _ensure_column(cursor, "consultas", "recomendacoes_whatsapp_enviadas_em", "ALTER TABLE consultas ADD COLUMN recomendacoes_whatsapp_enviadas_em DATETIME DEFAULT NULL")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS estados_conversa (
@@ -123,7 +157,6 @@ def init_db() -> None:
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
         """)
 
-        # Médico padrão
         cursor.execute("""
             INSERT INTO medicos (id, nome, telefone, ativo)
             VALUES (1, 'Dr. Paulo', '5561900000000', 1)
@@ -133,7 +166,6 @@ def init_db() -> None:
                 ativo    = VALUES(ativo)
         """)
 
-        # Planos padrão (valor_adiantamento = 50% do valor_total)
         planos = [
             ("nutri_consulta_unica",      "Consulta Nutricional Completa",                          450.00,  225.00),
             ("nutri_trimestral",          "Pacote Trimestral Premium",                               850.00,  425.00),

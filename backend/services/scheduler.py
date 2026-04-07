@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 from datetime import timedelta
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -11,10 +11,11 @@ from utils.time_utils import APP_TIMEZONE, local_schedule_to_utc, utc_now, utc_n
 
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone=APP_TIMEZONE)
+_CANCELAMENTO_POR_EXPIRACAO = "Cancelado automaticamente por expiracao do pagamento"
 
 
 def expirar_pagamentos_pendentes() -> None:
-    """Libera horários cujo prazo de pagamento (1h) expirou."""
+    """Libera horarios cujo prazo de pagamento (1h) expirou."""
     agora = utc_now_naive()
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -33,17 +34,23 @@ def expirar_pagamentos_pendentes() -> None:
 
         for consulta in expiradas:
             cursor.execute(
-                "UPDATE consultas SET status = 'cancelado' WHERE id = %s",
-                (consulta["id"],),
+                """
+                UPDATE consultas
+                SET status = 'cancelado',
+                    motivo_cancelamento = %s,
+                    pagamento_notificacao_em_andamento = 0,
+                    pagamento_notificacao_lock_em = NULL
+                WHERE id = %s
+                """,
+                (_CANCELAMENTO_POR_EXPIRACAO, consulta["id"]),
             )
             logger.info("Consulta %s cancelada por falta de pagamento.", consulta["id"])
 
             try:
                 send_whatsapp_message(
                     consulta["telefone"],
-                    "Seu agendamento foi cancelado pois o pagamento não foi confirmado "
-                    "dentro de 1 hora.\n\n"
-                    "Se desejar reagendar, é só digitar 1. 😊"
+                    "Seu agendamento foi cancelado pois o pagamento nao foi confirmado dentro de 1 hora.\n\n"
+                    "Se desejar reagendar, e so digitar 1."
                 )
             except Exception:
                 logger.exception("Erro ao notificar cliente sobre cancelamento - id=%s", consulta["id"])
@@ -60,7 +67,7 @@ def verificar_lembretes() -> None:
             SELECT c.id, c.data, c.horario, cli.telefone
             FROM consultas c
             JOIN clientes cli ON cli.id = c.cliente_id
-            WHERE c.status           = 'confirmado'
+            WHERE c.status = 'confirmado'
               AND c.lembrete_enviado = 0
             """
         )
@@ -75,10 +82,10 @@ def verificar_lembretes() -> None:
                 continue
 
             mensagem = (
-                f"Olá! Lembrete da sua consulta com Dr. Paulo Jordão.\n\n"
+                f"Ola! Lembrete da sua consulta com Dr. Paulo Jordao.\n\n"
                 f"Data: {consulta['data'].strftime('%d/%m')}\n"
-                f"Horário: {horario_fmt}\n\n"
-                f"Em caso de necessidade, responda esta mensagem."
+                f"Horario: {horario_fmt}\n\n"
+                "Em caso de necessidade, responda esta mensagem."
             )
             send_whatsapp_message(consulta["telefone"], mensagem)
             cursor.execute(

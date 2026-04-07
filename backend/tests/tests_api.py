@@ -1,4 +1,4 @@
-﻿from contextlib import contextmanager
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 
 import jwt
@@ -26,6 +26,57 @@ def auth_headers():
         algorithm="HS256",
     )
     return {"Authorization": f"Bearer {token}"}
+
+
+class FakePaymentState:
+    def __init__(self, row):
+        self.row = row
+
+
+class FakePaymentCursor:
+    def __init__(self, state):
+        self.state = state
+
+    def execute(self, query, params=None):
+        normalized = " ".join(query.split())
+
+        if "SELECT" in normalized and "FROM consultas c" in normalized and "FOR UPDATE" in normalized:
+            return None
+
+        if normalized.startswith("UPDATE consultas SET status = 'confirmado'"):
+            self.state.row["status"] = "confirmado"
+            self.state.row["pagamento_confirmado_em"] = self.state.row.get("pagamento_confirmado_em") or params[0]
+            self.state.row["pagamento_notificacao_em_andamento"] = 1
+            self.state.row["pagamento_notificacao_lock_em"] = params[1]
+            self.state.row["motivo_cancelamento"] = None
+            return None
+
+        if normalized.startswith("UPDATE consultas SET pagamento_notificacao_em_andamento = 0"):
+            self.state.row["pagamento_notificacao_em_andamento"] = 0
+            self.state.row["pagamento_notificacao_lock_em"] = None
+            if params[0] is not None and not self.state.row.get("confirmacao_whatsapp_enviada_em"):
+                self.state.row["confirmacao_whatsapp_enviada_em"] = params[0]
+            if params[1] is not None and not self.state.row.get("recomendacoes_whatsapp_enviadas_em"):
+                self.state.row["recomendacoes_whatsapp_enviadas_em"] = params[1]
+            return None
+
+        raise AssertionError(f"SQL n?o esperado: {normalized}")
+
+    def fetchone(self):
+        return dict(self.state.row)
+
+
+class FakePaymentConn:
+    def __init__(self, state):
+        self.state = state
+
+    def cursor(self, dictionary=False):
+        return FakePaymentCursor(self.state)
+
+
+@contextmanager
+def fake_payment_db(state):
+    yield FakePaymentConn(state)
 
 
 def test_login_bloqueado_retorna_429(client, monkeypatch):
@@ -80,30 +131,20 @@ def test_historico_rejeita_por_pagina_acima_do_limite(client):
 
 
 def test_confirmar_pagamento_retorna_aviso_quando_notificacao_falha(client, monkeypatch):
-    monkeypatch.setattr(api_module, "atualizar_status_consulta", lambda consulta_id, status: True)
+    state = FakePaymentState({
+        "id": 1,
+        "status": "aguardando_pagamento",
+        "data": date(2026, 4, 10),
+        "horario": "09:00:00",
+        "telefone": "5538999999999",
+        "pagamento_confirmado_em": None,
+        "pagamento_notificacao_em_andamento": 0,
+        "pagamento_notificacao_lock_em": None,
+        "confirmacao_whatsapp_enviada_em": None,
+        "recomendacoes_whatsapp_enviadas_em": None,
+    })
 
-    class FakeCursor:
-        def execute(self, *args, **kwargs):
-            return None
-
-        def fetchone(self):
-            return {"telefone": "5538999999999", "data": date(2026, 4, 10), "horario": "09:00:00"}
-
-    class FakeConn:
-        def cursor(self, dictionary=False):
-            return FakeCursor()
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-    @contextmanager
-    def fake_get_db():
-        yield FakeConn()
-
-    monkeypatch.setattr("database.connection.get_db", fake_get_db)
+    monkeypatch.setattr("database.connection.get_db", lambda: fake_payment_db(state))
     monkeypatch.setattr("services.whatsapp.send_whatsapp_message", lambda telefone, texto: {"response": {"messages": [{"id": "wamid.1"}]}, "payload": {"type": "text"}})
     monkeypatch.setattr("services.whatsapp.send_recomendacoes_pre_consulta", lambda telefone: {"response": {}, "payload": {"type": "text"}})
     monkeypatch.setattr(api_module, "registrar_envio_whatsapp", lambda *args, **kwargs: None)
@@ -115,5 +156,62 @@ def test_confirmar_pagamento_retorna_aviso_quando_notificacao_falha(client, monk
     body = resposta.get_json()
     assert resposta.status_code == 200
     assert body["status"] == "confirmado"
+    assert body["idempotente"] is False
     assert body["notificacao_enviada"] is False
-    assert "recomendações" in body["aviso"].lower()
+    assert "recomendacoes" in body["aviso"].lower()
+    assert state.row["confirmacao_whatsapp_enviada_em"] is not None
+    assert state.row["recomendacoes_whatsapp_enviadas_em"] is None
+
+
+def test_confirmar_pagamento_e_idempotente_quando_ja_notificado(client, monkeypatch):
+    now_db = datetime.now(UTC).replace(tzinfo=None)
+    state = FakePaymentState({
+        "id": 1,
+        "status": "confirmado",
+        "data": date(2026, 4, 10),
+        "horario": "09:00:00",
+        "telefone": "5538999999999",
+        "pagamento_confirmado_em": now_db,
+        "pagamento_notificacao_em_andamento": 0,
+        "pagamento_notificacao_lock_em": None,
+        "confirmacao_whatsapp_enviada_em": now_db,
+        "recomendacoes_whatsapp_enviadas_em": now_db,
+    })
+
+    monkeypatch.setattr("database.connection.get_db", lambda: fake_payment_db(state))
+    monkeypatch.setattr("services.whatsapp.send_whatsapp_message", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Nao deveria enviar novamente")))
+    monkeypatch.setattr("services.whatsapp.send_recomendacoes_pre_consulta", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Nao deveria reenviar recomendacoes")))
+
+    resposta = client.patch("/api/consultas/1/confirmar-pagamento", headers=auth_headers())
+
+    body = resposta.get_json()
+    assert resposta.status_code == 200
+    assert body["idempotente"] is True
+    assert body["notificacao_enviada"] is True
+
+
+def test_confirmar_pagamento_nao_duplica_envio_com_lock_ativo(client, monkeypatch):
+    now_db = datetime.now(UTC).replace(tzinfo=None)
+    state = FakePaymentState({
+        "id": 1,
+        "status": "confirmado",
+        "data": date(2026, 4, 10),
+        "horario": "09:00:00",
+        "telefone": "5538999999999",
+        "pagamento_confirmado_em": now_db,
+        "pagamento_notificacao_em_andamento": 1,
+        "pagamento_notificacao_lock_em": now_db,
+        "confirmacao_whatsapp_enviada_em": now_db,
+        "recomendacoes_whatsapp_enviadas_em": None,
+    })
+
+    monkeypatch.setattr("database.connection.get_db", lambda: fake_payment_db(state))
+    monkeypatch.setattr("services.whatsapp.send_whatsapp_message", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Nao deveria enviar com lock ativo")))
+    monkeypatch.setattr("services.whatsapp.send_recomendacoes_pre_consulta", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Nao deveria enviar com lock ativo")))
+
+    resposta = client.patch("/api/consultas/1/confirmar-pagamento", headers=auth_headers())
+
+    body = resposta.get_json()
+    assert resposta.status_code == 200
+    assert body["idempotente"] is True
+    assert "processada" in body["aviso"].lower()

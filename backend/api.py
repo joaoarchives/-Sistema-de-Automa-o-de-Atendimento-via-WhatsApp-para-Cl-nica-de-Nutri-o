@@ -18,7 +18,7 @@ from database.consultas import (
 )
 from database.mensagens import get_conversas_lista, get_mensagens_por_telefone, salvar_log_whatsapp
 from database.runtime_guards import clear_login_failures, get_login_rate_limit, register_login_failure
-from utils.time_utils import local_today, utc_isoformat, utc_now
+from utils.time_utils import db_utc_to_aware, local_today, utc_isoformat, utc_now, utc_now_naive
 
 api = Blueprint("api", __name__, url_prefix="/api")
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ _SECRET_PLACEHOLDERS = {"", "chave_secreta", "dev_secret", "sua_chave_secreta", 
 _MAX_LOGIN_ATTEMPTS = int(os.getenv("LOGIN_MAX_TENTATIVAS", "5"))
 _LOGIN_BLOCK_MINUTES = int(os.getenv("LOGIN_BLOQUEIO_MINUTOS", "15"))
 _MAX_POR_PAGINA = int(os.getenv("HISTORICO_MAX_POR_PAGINA", "100"))
+_PAYMENT_NOTIFICATION_LOCK_MINUTES = int(os.getenv("PAGAMENTO_NOTIFICACAO_LOCK_MINUTOS", "2"))
 
 
 def limpar_row(row):
@@ -208,6 +209,31 @@ def parse_positive_int_arg(name: str, default: int, *, minimum: int = 1, maximum
     return value, None
 
 
+def _notification_sent_at(row: dict, field_name: str) -> datetime | None:
+    value = row.get(field_name)
+    if not value:
+        return None
+    return db_utc_to_aware(value)
+
+
+def _notification_already_complete(row: dict) -> bool:
+    return bool(
+        _notification_sent_at(row, "confirmacao_whatsapp_enviada_em")
+        and _notification_sent_at(row, "recomendacoes_whatsapp_enviadas_em")
+    )
+
+
+def _notification_lock_active(row: dict, *, now_utc: datetime) -> bool:
+    if not bool(row.get("pagamento_notificacao_em_andamento")):
+        return False
+
+    locked_at = db_utc_to_aware(row.get("pagamento_notificacao_lock_em"))
+    if locked_at is None:
+        return True
+
+    return locked_at > now_utc - timedelta(minutes=_PAYMENT_NOTIFICATION_LOCK_MINUTES)
+
+
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -374,7 +400,7 @@ def concluir_consulta(consulta_id):
 @token_required
 def cancelar_consulta(consulta_id):
     dados = request.get_json() or {}
-    motivo = dados.get("motivo", "Cancelado pelo painel")
+    motivo = str(dados.get("motivo") or "Cancelado pelo painel").strip()
 
     sucesso = atualizar_status_consulta(consulta_id, "cancelado", motivo=motivo)
     if not sucesso:
@@ -393,64 +419,152 @@ def confirmar_pagamento(consulta_id):
     from database.connection import get_db
     from services.whatsapp import send_recomendacoes_pre_consulta, send_whatsapp_message
 
-    sucesso = atualizar_status_consulta(consulta_id, "confirmado")
+    agora_utc = utc_now()
+    agora_db = utc_now_naive()
+
+    with get_db() as conn:
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            """
+            SELECT
+                c.id,
+                c.status,
+                c.data,
+                CAST(c.horario AS CHAR) AS horario,
+                cli.telefone,
+                c.pagamento_confirmado_em,
+                c.pagamento_notificacao_em_andamento,
+                c.pagamento_notificacao_lock_em,
+                c.confirmacao_whatsapp_enviada_em,
+                c.recomendacoes_whatsapp_enviadas_em
+            FROM consultas c
+            JOIN clientes cli ON cli.id = c.cliente_id
+            WHERE c.id = %s
+            FOR UPDATE
+            """,
+            (consulta_id,),
+        )
+        row = cursor.fetchone()
+
+        if not row:
+            return jsonify({"erro": "Consulta nao encontrada"}), 404
+
+        if row["status"] == "cancelado":
+            return jsonify({"erro": "Consulta cancelada nao pode ter pagamento confirmado."}), 409
+
+        if row["status"] == "concluido":
+            return jsonify({"erro": "Consulta concluida nao pode ter pagamento confirmado."}), 409
+
+        if _notification_already_complete(row):
+            return jsonify({
+                "mensagem": "Pagamento ja estava confirmado",
+                "id": consulta_id,
+                "status": "confirmado",
+                "idempotente": True,
+                "notificacao_enviada": True,
+                "aviso": None,
+            })
+
+        if _notification_lock_active(row, now_utc=agora_utc):
+            return jsonify({
+                "mensagem": "Confirmacao de pagamento ja esta em processamento",
+                "id": consulta_id,
+                "status": row["status"] or "confirmado",
+                "idempotente": True,
+                "notificacao_enviada": _notification_already_complete(row),
+                "aviso": "A confirmacao ja esta sendo processada. Aguarde alguns instantes.",
+            })
+
+        cursor.execute(
+            """
+            UPDATE consultas
+            SET status = 'confirmado',
+                pagamento_confirmado_em = COALESCE(pagamento_confirmado_em, %s),
+                pagamento_notificacao_em_andamento = 1,
+                pagamento_notificacao_lock_em = %s,
+                motivo_cancelamento = NULL
+            WHERE id = %s
+            """,
+            (agora_db, agora_db, consulta_id),
+        )
+
+    confirmacao_ja_enviada = bool(row.get("confirmacao_whatsapp_enviada_em"))
+    recomendacoes_ja_enviadas = bool(row.get("recomendacoes_whatsapp_enviadas_em"))
+    confirmacao_enviada_agora = False
+    recomendacoes_enviadas_agora = False
     avisos = []
     notificacao_enviada = True
-    if not sucesso:
-        return jsonify({"erro": "Consulta não encontrada"}), 404
+
+    data_fmt = row["data"].strftime("%d/%m") if hasattr(row["data"], "strftime") else str(row["data"])
+    horario_fmt = str(row["horario"])[:5]
 
     try:
-        with get_db() as conn:
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("""
-                SELECT cli.telefone, c.data, CAST(c.horario AS CHAR) AS horario
-                FROM consultas c
-                JOIN clientes cli ON cli.id = c.cliente_id
-                WHERE c.id = %s
-            """, (consulta_id,))
-            row = cursor.fetchone()
-
-        if row:
-            data_fmt = row["data"].strftime("%d/%m") if hasattr(row["data"], "strftime") else str(row["data"])
-            horario_fmt = str(row["horario"])[:5]
+        if not confirmacao_ja_enviada:
             resultado_confirmacao = send_whatsapp_message(
                 row["telefone"],
-                f"Pagamento confirmado! ✅\n\n"
-                f"Sua consulta está agendada para {data_fmt} às {horario_fmt}.\n\n"
-                f"Qualquer dúvida, estamos à disposição. Até lá! 💪"
+                f"Pagamento confirmado!\n\n"
+                f"Sua consulta esta agendada para {data_fmt} as {horario_fmt}.\n\n"
+                f"Qualquer duvida, estamos a disposicao. Ate la!"
             )
             registrar_envio_whatsapp(row["telefone"], resultado_confirmacao, "texto")
-            if not envio_whatsapp_sucesso(resultado_confirmacao):
+            if envio_whatsapp_sucesso(resultado_confirmacao):
+                confirmacao_enviada_agora = True
+            else:
                 notificacao_enviada = False
-                avisos.append("A mensagem de confirmação não pôde ser enviada ao paciente.")
+                avisos.append("A mensagem de confirmacao nao pode ser enviada ao paciente.")
+
+        if not recomendacoes_ja_enviadas:
             resultado_recomendacoes = send_recomendacoes_pre_consulta(row["telefone"])
             registrar_envio_whatsapp(row["telefone"], resultado_recomendacoes, "texto")
-            if not envio_whatsapp_sucesso(resultado_recomendacoes):
+            if envio_whatsapp_sucesso(resultado_recomendacoes):
+                recomendacoes_enviadas_agora = True
+            else:
                 notificacao_enviada = False
-                avisos.append("As recomendações pré-consulta não puderam ser enviadas ao paciente.")
-            try:
-                from database.estados import get_estado, set_estado
-                _, dados_atuais = get_estado(row["telefone"])
-                dados_atuais["data"] = row["data"].isoformat() if hasattr(row["data"], "isoformat") else str(row["data"])
-                dados_atuais["horario"] = horario_fmt
-                set_estado(row["telefone"], "consulta_confirmada", dados_atuais)
-            except Exception:
-                logger.exception("Erro ao atualizar estado da conversa após confirmação do pagamento.")
-                notificacao_enviada = False
-                avisos.append("O estado da conversa não pôde ser atualizado após a confirmação.")
-        else:
+                avisos.append("As recomendacoes pre-consulta nao puderam ser enviadas ao paciente.")
+
+        try:
+            from database.estados import get_estado, set_estado
+            _, dados_atuais = get_estado(row["telefone"])
+            dados_atuais["data"] = row["data"].isoformat() if hasattr(row["data"], "isoformat") else str(row["data"])
+            dados_atuais["horario"] = horario_fmt
+            set_estado(row["telefone"], "consulta_confirmada", dados_atuais)
+        except Exception:
+            logger.exception("Erro ao atualizar estado da conversa apos confirmacao do pagamento.")
             notificacao_enviada = False
-            avisos.append("A consulta foi confirmada, mas o telefone do paciente não foi localizado para notificação.")
+            avisos.append("O estado da conversa nao pode ser atualizado apos a confirmacao.")
     except Exception:
-        logger.exception("Erro ao notificar cliente após confirmação do pagamento.")
+        logger.exception("Erro ao notificar cliente apos confirmacao do pagamento.")
         notificacao_enviada = False
         avisos.append("A consulta foi confirmada, mas houve falha ao notificar o paciente.")
+    finally:
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE consultas
+                SET pagamento_notificacao_em_andamento = 0,
+                    pagamento_notificacao_lock_em = NULL,
+                    confirmacao_whatsapp_enviada_em = COALESCE(confirmacao_whatsapp_enviada_em, %s),
+                    recomendacoes_whatsapp_enviadas_em = COALESCE(recomendacoes_whatsapp_enviadas_em, %s)
+                WHERE id = %s
+                """,
+                (
+                    agora_db if confirmacao_enviada_agora else None,
+                    agora_db if recomendacoes_enviadas_agora else None,
+                    consulta_id,
+                ),
+            )
 
     return jsonify({
         "mensagem": "Pagamento confirmado",
         "id": consulta_id,
         "status": "confirmado",
-        "notificacao_enviada": notificacao_enviada,
+        "idempotente": False,
+        "notificacao_enviada": notificacao_enviada and (
+            confirmacao_ja_enviada or confirmacao_enviada_agora
+        ) and (
+            recomendacoes_ja_enviadas or recomendacoes_enviadas_agora
+        ),
         "aviso": " ".join(dict.fromkeys(avisos)) if avisos else None,
     })
 

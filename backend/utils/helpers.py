@@ -1,5 +1,7 @@
-import json
-from datetime import datetime
+﻿import json
+from datetime import date, datetime
+
+from utils.time_utils import local_today
 
 
 def timedelta_para_hhmm(valor) -> str:
@@ -22,12 +24,12 @@ def gerar_horarios(periodo: str, tipo_consulta: str = "primeira_consulta") -> li
     """
     limites = {
         "manha": {
-            "primeira_consulta": (9,  0, 11,  0),
-            "retorno":           (9,  0, 11, 30),
+            "primeira_consulta": (9, 0, 11, 0),
+            "retorno": (9, 0, 11, 30),
         },
         "tarde": {
-            "primeira_consulta": (16, 0, 18,  0),
-            "retorno":           (16, 0, 18, 30),
+            "primeira_consulta": (16, 0, 18, 0),
+            "retorno": (16, 0, 18, 30),
         },
     }
     tipo_key = tipo_consulta if tipo_consulta in ("primeira_consulta", "retorno") else "primeira_consulta"
@@ -54,25 +56,25 @@ def json_loads(data: str) -> dict:
     return json.loads(data)
 
 
+def _resolver_data(data_str: str) -> date:
+    dia, mes = map(int, data_str.split("/"))
+    hoje = local_today()
+    data_resolvida = date(hoje.year, mes, dia)
+    if data_resolvida < hoje:
+        data_resolvida = date(hoje.year + 1, mes, dia)
+    return data_resolvida
+
+
 def data_valida(data_str: str) -> bool:
     try:
-        dia, mes = map(int, data_str.split("/"))
-        hoje = datetime.now()
-        data = datetime(hoje.year, mes, dia)
-        if data.date() < hoje.date():
-            data = datetime(hoje.year + 1, mes, dia)
+        _resolver_data(data_str)
         return True
     except ValueError:
         return False
 
 
 def formatar_data_iso(data_str: str) -> str:
-    dia, mes = map(int, data_str.split("/"))
-    hoje = datetime.now()
-    data = datetime(hoje.year, mes, dia)
-    if data.date() < hoje.date():
-        data = datetime(hoje.year + 1, mes, dia)
-    return data.strftime("%Y-%m-%d")
+    return _resolver_data(data_str).strftime("%Y-%m-%d")
 
 
 def formatar_data_br(data_iso: str) -> str:
