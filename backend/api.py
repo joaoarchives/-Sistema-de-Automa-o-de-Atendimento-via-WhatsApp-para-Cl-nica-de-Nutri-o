@@ -24,7 +24,6 @@ MEDICO_USER = os.getenv("MEDICO_USER", "").strip()
 MEDICO_PASS = os.getenv("MEDICO_PASS", "").strip()
 
 _SECRET_PLACEHOLDERS = {"", "chave_secreta", "dev_secret", "sua_chave_secreta", "secret"}
-_PASSWORD_PLACEHOLDERS = {"", "senha123", "senha_segura", "password", "123456"}
 
 
 # ── Auth ─────────────────────────────────────────────────────────────────────
@@ -73,7 +72,7 @@ def auth_configurada() -> bool:
     return (
         SECRET_KEY not in _SECRET_PLACEHOLDERS
         and bool(MEDICO_USER)
-        and MEDICO_PASS not in _PASSWORD_PLACEHOLDERS
+        and bool(MEDICO_PASS)
     )
 
 

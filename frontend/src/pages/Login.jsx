@@ -4,10 +4,10 @@ import { login } from "../api/api";
 
 export default function Login() {
   const [usuario, setUsuario] = useState("");
-  const [senha, setSenha]     = useState("");
-  const [erro, setErro]       = useState("");
+  const [senha, setSenha] = useState("");
+  const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
-  const navigate              = useNavigate();
+  const navigate = useNavigate();
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -17,52 +17,52 @@ export default function Login() {
       const res = await login(usuario, senha);
       localStorage.setItem("token", res.data.token);
       navigate("/agenda/dia");
-    } catch {
-      setErro("Usuário ou senha incorretos.");
+    } catch (error) {
+      setErro(error?.response?.data?.erro || "Usuário ou senha incorretos.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-      <div style={styles.wrapper}>
-        <form style={styles.card} onSubmit={handleSubmit}>
-          <div style={styles.logoWrap}>
-            <img src="/brand-mark.png" alt="Paulo Jordão" style={styles.logoMark} />
-          </div>
-          <h1 style={styles.titulo}>Paulo Jordão</h1>
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Usuário</label>
-            <input
-                type="text"
-                placeholder="drpaulo"
-                value={usuario}
-                onChange={(e) => setUsuario(e.target.value)}
-                style={styles.input}
-                autoFocus
-                required
-            />
-          </div>
+    <div style={styles.wrapper}>
+      <form style={styles.card} onSubmit={handleSubmit}>
+        <div style={styles.logoWrap}>
+          <img src="/brand-mark.png" alt="Paulo Jordão" style={styles.logoMark} />
+        </div>
+        <h1 style={styles.titulo}>Paulo Jordão</h1>
+        <div style={styles.fieldGroup}>
+          <label style={styles.label}>Usuário</label>
+          <input
+            type="text"
+            placeholder="drpaulo"
+            value={usuario}
+            onChange={(e) => setUsuario(e.target.value)}
+            style={styles.input}
+            autoFocus
+            required
+          />
+        </div>
 
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Senha</label>
-            <input
-                type="password"
-                placeholder="••••••••"
-                value={senha}
-                onChange={(e) => setSenha(e.target.value)}
-                style={styles.input}
-                required
-            />
-          </div>
+        <div style={styles.fieldGroup}>
+          <label style={styles.label}>Senha</label>
+          <input
+            type="password"
+            placeholder="••••••••"
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            style={styles.input}
+            required
+          />
+        </div>
 
-          {erro && <p style={styles.erro}>{erro}</p>}
+        {erro && <p style={styles.erro}>{erro}</p>}
 
-          <button type="submit" style={styles.btn} disabled={loading}>
-            {loading ? "Entrando..." : "Entrar"}
-          </button>
-        </form>
-      </div>
+        <button type="submit" style={styles.btn} disabled={loading}>
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
+      </form>
+    </div>
   );
 }
 
@@ -108,7 +108,7 @@ const styles = {
     background: "#00b37e",
   },
   titulo: { margin: 0, fontSize: 20, fontWeight: 600, color: "#e6edf3" },
-  sub:    { margin: 0, fontSize: 13, color: "#8b949e" },
+  sub: { margin: 0, fontSize: 13, color: "#8b949e" },
   fieldGroup: { width: "100%", display: "flex", flexDirection: "column", gap: 6 },
   label: { fontSize: 13, color: "#8b949e", textAlign: "left" },
   input: {
