@@ -31,8 +31,6 @@ export default function Login() {
             <img src="/brand-mark.png" alt="Paulo Jordão" style={styles.logoMark} />
           </div>
           <h1 style={styles.titulo}>Paulo Jordão</h1>
-          <p style={styles.sub}>Painel do consultório</p>
-
           <div style={styles.fieldGroup}>
             <label style={styles.label}>Usuário</label>
             <input
