@@ -60,6 +60,10 @@ def _is_configured() -> bool:
     )
 
 
+def _allow_mock_mode() -> bool:
+    return (os.getenv("WHATSAPP_ALLOW_MOCK", "").strip().lower() in {"1", "true", "yes", "on"})
+
+
 def get_pdf_planos_url() -> str:
     if PDF_PLANOS_URL:
         return PDF_PLANOS_URL
@@ -89,7 +93,15 @@ def _fake_response(payload: dict) -> dict:
 
 def _post_whatsapp(payload: dict, erro_prefixo: str) -> dict:
     if not _is_configured():
-        return _fake_response(payload)
+        mensagem = (
+            "WHATSAPP_TOKEN/WHATSAPP_PHONE_NUMBER_ID não configurados corretamente "
+            "para envio real no WhatsApp."
+        )
+        if _allow_mock_mode():
+            logger.warning("%s Modo mock explicitamente habilitado.", mensagem)
+            return _fake_response(payload)
+        logger.error("%s", mensagem)
+        raise RuntimeError(mensagem)
 
     response = requests.post(_base_url(), headers=_headers(), json=payload, timeout=30)
     response_json = response.json()
