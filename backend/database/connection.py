@@ -12,6 +12,7 @@ from config.settings import Config
 _pool = None
 _pool_pid = None
 _pool_lock = Lock()
+_SESSION_TIME_ZONE = "+00:00"
 
 
 def _build_pool():
@@ -47,11 +48,23 @@ def _acquire_connection():
 
     while True:
         try:
-            return pool.get_connection()
+            conn = pool.get_connection()
+            _configure_connection_session(conn)
+            return conn
         except PoolError:
             if timeout == 0 or monotonic() >= deadline:
                 raise
             sleep(retry_interval)
+
+
+def _configure_connection_session(conn) -> None:
+    # The app persists UTC-naive datetimes in MySQL; every acquired session must
+    # be pinned to UTC so reads/writes stay consistent regardless of host/db TZ.
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SET time_zone = %s", (_SESSION_TIME_ZONE,))
+    finally:
+        cursor.close()
 
 
 @contextmanager
@@ -78,7 +91,7 @@ def get_db():
 
 
 def get_direct_db_connection():
-    return mysql.connector.connect(
+    conn = mysql.connector.connect(
         host=Config.DB_HOST,
         port=Config.DB_PORT,
         user=Config.DB_USER,
@@ -87,3 +100,5 @@ def get_direct_db_connection():
         connection_timeout=Config.DB_CONNECTION_TIMEOUT,
         autocommit=False,
     )
+    _configure_connection_session(conn)
+    return conn
