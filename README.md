@@ -490,6 +490,6 @@ Nas primeiras horas após o deploy, valide:
 
 ## Licença
 
-Nenhum arquivo de licença foi encontrado neste repositório.
+Uso interno / privado. Todos os direitos reservados.
 
 
