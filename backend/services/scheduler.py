@@ -94,44 +94,66 @@ def verificar_lembretes() -> None:
             )
 
 
+_JOB_DEFINITIONS = (
+    {
+        "id": "expirar_pagamentos",
+        "func": expirar_pagamentos_pendentes,
+        "trigger": "interval",
+        "kwargs": {"minutes": 5, "replace_existing": True, "coalesce": True, "max_instances": 1, "misfire_grace_time": 120},
+    },
+    {
+        "id": "verificar_lembretes",
+        "func": verificar_lembretes,
+        "trigger": "interval",
+        "kwargs": {"minutes": 1, "replace_existing": True, "coalesce": True, "max_instances": 1, "misfire_grace_time": 60},
+    },
+    {
+        "id": "enviar_resumo_do_dia",
+        "func": enviar_resumo_das_06,
+        "trigger": "cron",
+        "kwargs": {"hour": 6, "minute": 0, "replace_existing": True, "coalesce": True, "max_instances": 1, "misfire_grace_time": 600},
+    },
+)
+
+
+def descrever_jobs_scheduler() -> list[dict]:
+    descricoes = []
+    for definicao in _JOB_DEFINITIONS:
+        kwargs = dict(definicao["kwargs"])
+        descricoes.append(
+            {
+                "id": definicao["id"],
+                "trigger": definicao["trigger"],
+                "kwargs": kwargs,
+            }
+        )
+    return descricoes
+
+
 def iniciar_scheduler() -> None:
     if scheduler.running:
+        logger.info("Scheduler ja estava em execucao; nenhum job adicional sera registrado.")
         return
 
-    scheduler.add_job(
-        expirar_pagamentos_pendentes,
-        "interval",
-        minutes=5,
-        id="expirar_pagamentos",
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-        misfire_grace_time=120,
-    )
-    scheduler.add_job(
-        verificar_lembretes,
-        "interval",
-        minutes=1,
-        id="verificar_lembretes",
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-        misfire_grace_time=60,
-    )
-    scheduler.add_job(
-        enviar_resumo_das_06,
-        "cron",
-        hour=6,
-        minute=0,
-        id="enviar_resumo_do_dia",
-        replace_existing=True,
-        coalesce=True,
-        max_instances=1,
-        misfire_grace_time=600,
-    )
+    logger.info("Inicializando scheduler dedicado - timezone=%s jobs=%s", APP_TIMEZONE, len(_JOB_DEFINITIONS))
+    for definicao in _JOB_DEFINITIONS:
+        scheduler.add_job(
+            definicao["func"],
+            definicao["trigger"],
+            id=definicao["id"],
+            **definicao["kwargs"],
+        )
+        logger.info(
+            "Job registrado no scheduler - id=%s trigger=%s config=%s",
+            definicao["id"],
+            definicao["trigger"],
+            definicao["kwargs"],
+        )
     scheduler.start()
+    logger.info("Scheduler em execucao com %s job(s) ativos.", len(_JOB_DEFINITIONS))
 
 
 def shutdown_scheduler() -> None:
     if scheduler.running:
+        logger.info("Encerrando scheduler dedicado.")
         scheduler.shutdown(wait=False)

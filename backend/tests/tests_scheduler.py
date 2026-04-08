@@ -39,3 +39,16 @@ def test_expirar_pagamentos_pendentes_persiste_motivo(monkeypatch):
     assert "motivo_cancelamento = %s" in update_sql
     assert params[0] == "Cancelado automaticamente por expiracao do pagamento"
     assert params[1] == 5
+
+
+def test_descrever_jobs_scheduler_retorna_jobs_esperados():
+    jobs = scheduler_module.descrever_jobs_scheduler()
+
+    assert [job["id"] for job in jobs] == [
+        "expirar_pagamentos",
+        "verificar_lembretes",
+        "enviar_resumo_do_dia",
+    ]
+    assert jobs[0]["trigger"] == "interval"
+    assert jobs[1]["kwargs"]["minutes"] == 1
+    assert jobs[2]["trigger"] == "cron"
