@@ -88,6 +88,8 @@ def init_db() -> None:
                 confirmacao_whatsapp_enviada_em      DATETIME    DEFAULT NULL,
                 recomendacoes_whatsapp_enviadas_em   DATETIME    DEFAULT NULL,
                 lembrete_enviado                     TINYINT(1)  NOT NULL DEFAULT 0,
+                lembrete_24h_enviado                 TINYINT(1)  NOT NULL DEFAULT 0,
+                lembrete_12h_enviado                 TINYINT(1)  NOT NULL DEFAULT 0,
                 medico_id                            INT  NOT NULL DEFAULT 1,
                 PRIMARY KEY (id),
                 KEY fk_consultas_cliente (cliente_id),
@@ -108,6 +110,8 @@ def init_db() -> None:
         _ensure_column(cursor, "consultas", "pagamento_notificacao_lock_em", "ALTER TABLE consultas ADD COLUMN pagamento_notificacao_lock_em DATETIME DEFAULT NULL")
         _ensure_column(cursor, "consultas", "confirmacao_whatsapp_enviada_em", "ALTER TABLE consultas ADD COLUMN confirmacao_whatsapp_enviada_em DATETIME DEFAULT NULL")
         _ensure_column(cursor, "consultas", "recomendacoes_whatsapp_enviadas_em", "ALTER TABLE consultas ADD COLUMN recomendacoes_whatsapp_enviadas_em DATETIME DEFAULT NULL")
+        _ensure_column(cursor, "consultas", "lembrete_24h_enviado", "ALTER TABLE consultas ADD COLUMN lembrete_24h_enviado TINYINT(1) NOT NULL DEFAULT 0")
+        _ensure_column(cursor, "consultas", "lembrete_12h_enviado", "ALTER TABLE consultas ADD COLUMN lembrete_12h_enviado TINYINT(1) NOT NULL DEFAULT 0")
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS estados_conversa (

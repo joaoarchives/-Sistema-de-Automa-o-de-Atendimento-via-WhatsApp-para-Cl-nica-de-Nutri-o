@@ -12,6 +12,9 @@ from utils.time_utils import APP_TIMEZONE, local_schedule_to_utc, utc_now, utc_n
 logger = logging.getLogger(__name__)
 scheduler = BackgroundScheduler(timezone=APP_TIMEZONE)
 _CANCELAMENTO_POR_EXPIRACAO = "Cancelado automaticamente por expiracao do pagamento"
+_LEMBRETE_INTERVALO_EXECUCAO = timedelta(minutes=1)
+_LEMBRETE_24H = timedelta(hours=24)
+_LEMBRETE_12H = timedelta(hours=12)
 
 
 def expirar_pagamentos_pendentes() -> None:
@@ -58,17 +61,20 @@ def expirar_pagamentos_pendentes() -> None:
 
 def verificar_lembretes() -> None:
     agora = utc_now()
-    limite = agora + timedelta(minutes=5)
+    limite = agora + _LEMBRETE_INTERVALO_EXECUCAO
 
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             """
-            SELECT c.id, c.data, c.horario, cli.telefone
+            SELECT c.id, c.data, c.horario, cli.telefone, c.lembrete_24h_enviado, c.lembrete_12h_enviado
             FROM consultas c
             JOIN clientes cli ON cli.id = c.cliente_id
             WHERE c.status = 'confirmado'
-              AND c.lembrete_enviado = 0
+              AND (
+                    c.lembrete_24h_enviado = 0
+                 OR c.lembrete_12h_enviado = 0
+              )
             """
         )
         consultas = cursor.fetchall()
@@ -77,21 +83,54 @@ def verificar_lembretes() -> None:
             horario_ref = consulta["horario"] if hasattr(consulta["horario"], "strftime") else timedelta_para_hhmm(consulta["horario"])
             horario_fmt = consulta["horario"].strftime("%H:%M") if hasattr(consulta["horario"], "strftime") else timedelta_para_hhmm(consulta["horario"])
             data_hora_utc = local_schedule_to_utc(consulta["data"], horario_ref)
+            if data_hora_utc <= agora:
+                continue
 
-            if not (agora <= data_hora_utc <= limite):
+            lembrete_tipo = None
+            if not bool(consulta.get("lembrete_24h_enviado")):
+                alvo_24h = data_hora_utc - _LEMBRETE_24H
+                if agora <= alvo_24h <= limite:
+                    lembrete_tipo = "24h"
+
+            if lembrete_tipo is None and not bool(consulta.get("lembrete_12h_enviado")):
+                alvo_12h = data_hora_utc - _LEMBRETE_12H
+                if agora <= alvo_12h <= limite:
+                    lembrete_tipo = "12h"
+
+            if lembrete_tipo is None:
                 continue
 
             mensagem = (
                 f"Ola! Lembrete da sua consulta com Dr. Paulo Jordao.\n\n"
+                f"Faltam {lembrete_tipo} para o seu atendimento.\n"
                 f"Data: {consulta['data'].strftime('%d/%m')}\n"
                 f"Horario: {horario_fmt}\n\n"
                 "Em caso de necessidade, responda esta mensagem."
             )
             send_whatsapp_message(consulta["telefone"], mensagem)
-            cursor.execute(
-                "UPDATE consultas SET lembrete_enviado = 1 WHERE id = %s",
-                (consulta["id"],),
-            )
+            if lembrete_tipo == "24h":
+                cursor.execute(
+                    """
+                    UPDATE consultas
+                    SET lembrete_24h_enviado = 1,
+                        lembrete_enviado = 1
+                    WHERE id = %s
+                      AND lembrete_24h_enviado = 0
+                    """,
+                    (consulta["id"],),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE consultas
+                    SET lembrete_12h_enviado = 1,
+                        lembrete_enviado = 1
+                    WHERE id = %s
+                      AND lembrete_12h_enviado = 0
+                    """,
+                    (consulta["id"],),
+                )
+            logger.info("Lembrete %s enviado para consulta %s.", lembrete_tipo, consulta["id"])
 
 
 _JOB_DEFINITIONS = (
