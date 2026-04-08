@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { MessageCircle, Search, CheckCheck, AlertCircle, ArrowLeft } from "lucide-react";
 import api from "../api/api";
 import useViewport from "../hooks/useViewport";
@@ -305,29 +305,22 @@ export default function Conversas() {
   const [loadingChat, setLoadingChat] = useState(false);
   const [erro, setErro] = useState("");
   const [listaAbertaMobile, setListaAbertaMobile] = useState(true);
+  const selecionadoRef = useRef(null);
 
   useEffect(() => {
     if (!isMobile) setListaAbertaMobile(true);
   }, [isMobile]);
 
-  const carregarLista = useCallback(async () => {
-    setLoadingLista(true);
-    setErro("");
-    try {
-      const res = await api.get("/api/conversas");
-      const lista = (res.data.conversas || []).map(normalizarConversa);
-      setConversas(lista);
-      setSelecionado((atual) => atual || lista[0] || null);
-    } catch {
-      setErro("Erro ao carregar conversas.");
-    } finally {
-      setLoadingLista(false);
-    }
-  }, []);
+  useEffect(() => {
+    selecionadoRef.current = selecionado;
+  }, [selecionado]);
 
   const abrirConversa = useCallback(
-    async (contato) => {
-      setSelecionado(contato);
+    async (contato, options = {}) => {
+      const { atualizarSelecionado = true } = options;
+      if (!contato?.telefone) return;
+
+      if (atualizarSelecionado) setSelecionado(contato);
       setLoadingChat(true);
       try {
         const res = await api.get(`/api/conversas/${encodeURIComponent(contato.telefone)}`);
@@ -342,15 +335,35 @@ export default function Conversas() {
     [isMobile],
   );
 
+  const carregarLista = useCallback(async () => {
+    setLoadingLista(true);
+    setErro("");
+    try {
+      const res = await api.get("/api/conversas");
+      const lista = (res.data.conversas || []).map(normalizarConversa);
+      setConversas(lista);
+
+      const atual = selecionadoRef.current;
+      const selecionadoAtualizado = atual ? lista.find((item) => item.telefone === atual.telefone) || null : null;
+
+      if (selecionadoAtualizado) {
+        setSelecionado(selecionadoAtualizado);
+      } else if (lista[0]) {
+        await abrirConversa(lista[0], { atualizarSelecionado: true });
+      } else {
+        setSelecionado(null);
+        setMensagens([]);
+      }
+    } catch {
+      setErro("Erro ao carregar conversas.");
+    } finally {
+      setLoadingLista(false);
+    }
+  }, [abrirConversa]);
+
   useEffect(() => {
     carregarLista();
   }, [carregarLista]);
-
-  useEffect(() => {
-    if (selecionado?.telefone) {
-      abrirConversa(selecionado);
-    }
-  }, [selecionado?.telefone]);
 
   const conversasFiltradas = useMemo(() => {
     const termo = busca.trim().toLowerCase();
