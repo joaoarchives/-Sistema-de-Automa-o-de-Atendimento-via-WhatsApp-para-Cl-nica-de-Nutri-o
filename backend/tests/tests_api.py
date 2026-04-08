@@ -51,16 +51,36 @@ class FakePaymentCursor:
             self.state.row["motivo_cancelamento"] = None
             return None
 
+        if normalized.startswith("UPDATE consultas SET confirmacao_whatsapp_enviada_em = COALESCE"):
+            if params[0] is not None and not self.state.row.get("confirmacao_whatsapp_enviada_em"):
+                self.state.row["confirmacao_whatsapp_enviada_em"] = params[0]
+            return None
+
+        if normalized.startswith("UPDATE consultas SET recomendacoes_whatsapp_enviadas_em = COALESCE"):
+            if params[0] is not None and not self.state.row.get("recomendacoes_whatsapp_enviadas_em"):
+                self.state.row["recomendacoes_whatsapp_enviadas_em"] = params[0]
+            return None
+
         if normalized.startswith("UPDATE consultas SET pagamento_notificacao_em_andamento = 0"):
             self.state.row["pagamento_notificacao_em_andamento"] = 0
             self.state.row["pagamento_notificacao_lock_em"] = None
-            if params[0] is not None and not self.state.row.get("confirmacao_whatsapp_enviada_em"):
-                self.state.row["confirmacao_whatsapp_enviada_em"] = params[0]
-            if params[1] is not None and not self.state.row.get("recomendacoes_whatsapp_enviadas_em"):
-                self.state.row["recomendacoes_whatsapp_enviadas_em"] = params[1]
             return None
 
-        raise AssertionError(f"SQL n?o esperado: {normalized}")
+        if normalized.startswith("UPDATE consultas SET confirmacao_whatsapp_enviada_em = COALESCE(confirmacao_whatsapp_enviada_em, %s), pagamento_notificacao_em_andamento = 0"):
+            if params[0] is not None and not self.state.row.get("confirmacao_whatsapp_enviada_em"):
+                self.state.row["confirmacao_whatsapp_enviada_em"] = params[0]
+            self.state.row["pagamento_notificacao_em_andamento"] = 0
+            self.state.row["pagamento_notificacao_lock_em"] = None
+            return None
+
+        if normalized.startswith("UPDATE consultas SET recomendacoes_whatsapp_enviadas_em = COALESCE(recomendacoes_whatsapp_enviadas_em, %s), pagamento_notificacao_em_andamento = 0"):
+            if params[0] is not None and not self.state.row.get("recomendacoes_whatsapp_enviadas_em"):
+                self.state.row["recomendacoes_whatsapp_enviadas_em"] = params[0]
+            self.state.row["pagamento_notificacao_em_andamento"] = 0
+            self.state.row["pagamento_notificacao_lock_em"] = None
+            return None
+
+        raise AssertionError(f"SQL nao esperado: {normalized}")
 
     def fetchone(self):
         return dict(self.state.row)
@@ -142,6 +162,8 @@ def test_confirmar_pagamento_retorna_aviso_quando_notificacao_falha(client, monk
         "pagamento_notificacao_lock_em": None,
         "confirmacao_whatsapp_enviada_em": None,
         "recomendacoes_whatsapp_enviadas_em": None,
+        "confirmacao_logada": 0,
+        "recomendacoes_logadas": 0,
     })
 
     monkeypatch.setattr("database.connection.get_db", lambda: fake_payment_db(state))
@@ -176,6 +198,8 @@ def test_confirmar_pagamento_e_idempotente_quando_ja_notificado(client, monkeypa
         "pagamento_notificacao_lock_em": None,
         "confirmacao_whatsapp_enviada_em": now_db,
         "recomendacoes_whatsapp_enviadas_em": now_db,
+        "confirmacao_logada": 1,
+        "recomendacoes_logadas": 1,
     })
 
     monkeypatch.setattr("database.connection.get_db", lambda: fake_payment_db(state))
@@ -203,6 +227,8 @@ def test_confirmar_pagamento_nao_duplica_envio_com_lock_ativo(client, monkeypatc
         "pagamento_notificacao_lock_em": now_db,
         "confirmacao_whatsapp_enviada_em": now_db,
         "recomendacoes_whatsapp_enviadas_em": None,
+        "confirmacao_logada": 1,
+        "recomendacoes_logadas": 0,
     })
 
     monkeypatch.setattr("database.connection.get_db", lambda: fake_payment_db(state))
