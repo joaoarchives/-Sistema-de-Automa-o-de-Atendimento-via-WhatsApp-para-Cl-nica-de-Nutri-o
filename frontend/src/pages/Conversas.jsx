@@ -304,6 +304,7 @@ export default function Conversas() {
   const [loadingLista, setLoadingLista] = useState(false);
   const [loadingChat, setLoadingChat] = useState(false);
   const [erro, setErro] = useState("");
+  const [erroChat, setErroChat] = useState("");
   const [listaAbertaMobile, setListaAbertaMobile] = useState(true);
   const selecionadoRef = useRef(null);
 
@@ -322,12 +323,14 @@ export default function Conversas() {
 
       if (atualizarSelecionado) setSelecionado(contato);
       setLoadingChat(true);
+      setErroChat("");
       try {
         const res = await api.get(`/api/conversas/${encodeURIComponent(contato.telefone)}`);
         setMensagens((res.data.mensagens || []).map(normalizarMensagem));
         if (isMobile) setListaAbertaMobile(false);
       } catch {
         setMensagens([]);
+        setErroChat("Não foi possível carregar o histórico desta conversa.");
       } finally {
         setLoadingChat(false);
       }
@@ -353,6 +356,7 @@ export default function Conversas() {
       } else {
         setSelecionado(null);
         setMensagens([]);
+        setErroChat("");
       }
     } catch {
       setErro("Erro ao carregar conversas.");
@@ -455,7 +459,8 @@ export default function Conversas() {
 
               <div style={{ ...s.chatBody, ...(isMobile ? s.chatBodyMobile : {}) }}>
                 {loadingChat && <p style={s.sideInfo}>Carregando mensagens...</p>}
-                {!loadingChat && !mensagens.length && <p style={s.sideInfo}>Nenhuma mensagem encontrada.</p>}
+                {!loadingChat && erroChat && <p style={s.sideError}>{erroChat}</p>}
+                {!loadingChat && !erroChat && !mensagens.length && <p style={s.sideInfo}>Nenhuma mensagem encontrada.</p>}
 
                 {mensagens.map((mensagem) => {
                   const bot = mensagem.senderType === "bot";

@@ -160,6 +160,18 @@ def test_login_falha_fechado_sem_medico_pass_hash(client, monkeypatch):
     assert "MEDICO_PASS_HASH" in resposta.get_json()["erro"]
 
 
+def test_obter_midia_conversa_retorna_erro_generico(client, monkeypatch):
+    monkeypatch.setattr(
+        "services.whatsapp.download_whatsapp_media",
+        lambda media_id: (_ for _ in ()).throw(RuntimeError("falha interna do provedor")),
+    )
+
+    resposta = client.get("/api/conversas/media/media-123", headers=auth_headers())
+
+    assert resposta.status_code == 502
+    assert resposta.get_json()["erro"] == "Não foi possível carregar a mídia no momento."
+
+
 def test_historico_rejeita_pagina_invalida(client):
     resposta = client.get("/api/consultas/historico?pagina=abc", headers=auth_headers())
 

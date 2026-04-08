@@ -678,8 +678,9 @@ def obter_midia_conversa(media_id):
         response = Response(media["content"], mimetype=media["mime_type"])
         response.headers["Content-Disposition"] = f'inline; filename="{media["filename"]}"'
         return response
-    except Exception as exc:
-        return jsonify({"erro": f"Não foi possível carregar a mídia: {exc}"}), 502
+    except Exception:
+        logger.exception("Falha ao carregar mídia do WhatsApp para o painel. media_id=%s", media_id)
+        return jsonify({"erro": "Não foi possível carregar a mídia no momento."}), 502
 
 
 @api.route("/conversas", methods=["GET"])
