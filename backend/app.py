@@ -39,23 +39,20 @@ from api import api as api_blueprint
 app.register_blueprint(api_blueprint)
 
 VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN")
-WEBHOOK_APP_SECRET = (
-    os.getenv("WHATSAPP_APP_SECRET")
-    or os.getenv("WEBHOOK_APP_SECRET")
-    or os.getenv("META_APP_SECRET")
-    or os.getenv("META_WEBHOOK_SECRET")
-    or ""
-).strip()
+_WEBHOOK_SECRET_CANDIDATES = (
+    ("WHATSAPP_APP_SECRET", os.getenv("WHATSAPP_APP_SECRET")),
+    ("WEBHOOK_APP_SECRET", os.getenv("WEBHOOK_APP_SECRET")),
+    ("META_APP_SECRET", os.getenv("META_APP_SECRET")),
+    ("META_WEBHOOK_SECRET", os.getenv("META_WEBHOOK_SECRET")),
+)
+WEBHOOK_APP_SECRET = next((str(valor).strip() for _, valor in _WEBHOOK_SECRET_CANDIDATES if str(valor or "").strip()), "")
+WEBHOOK_APP_SECRET_SOURCE = next((nome for nome, valor in _WEBHOOK_SECRET_CANDIDATES if str(valor or "").strip()), "none")
 
 logger.info(
-    "Webhook secrets carregados - WHATSAPP_APP_SECRET=%s WEBHOOK_APP_SECRET=%s META_APP_SECRET=%s META_WEBHOOK_SECRET=%s secret_efetivo=%s tamanho=%s DEBUG_SECRET_TEST=%r",
-    bool((os.getenv("WHATSAPP_APP_SECRET") or "").strip()),
-    bool((os.getenv("WEBHOOK_APP_SECRET") or "").strip()),
-    bool((os.getenv("META_APP_SECRET") or "").strip()),
-    bool((os.getenv("META_WEBHOOK_SECRET") or "").strip()),
+    "Webhook secret status - configurado=%s origem=%s comprimento_valido=%s",
     bool(WEBHOOK_APP_SECRET),
-    len(WEBHOOK_APP_SECRET),
-    os.getenv("DEBUG_SECRET_TEST"),
+    WEBHOOK_APP_SECRET_SOURCE,
+    len(WEBHOOK_APP_SECRET) >= 16,
 )
 
 _db_bootstrap_lock = Lock()
