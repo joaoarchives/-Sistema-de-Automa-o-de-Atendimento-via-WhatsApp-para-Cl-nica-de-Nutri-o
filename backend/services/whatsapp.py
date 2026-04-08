@@ -1,6 +1,7 @@
 import logging
 import os
 from pathlib import Path
+
 import requests
 
 logger = logging.getLogger(__name__)
@@ -61,7 +62,7 @@ def _is_configured() -> bool:
 
 
 def _allow_mock_mode() -> bool:
-    return (os.getenv("WHATSAPP_ALLOW_MOCK", "").strip().lower() in {"1", "true", "yes", "on"})
+    return os.getenv("WHATSAPP_ALLOW_MOCK", "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def get_pdf_planos_url() -> str:
@@ -213,13 +214,18 @@ def send_pagamento_instrucoes(telefone: str, valor: float) -> dict:
     return send_whatsapp_message(telefone, mensagem)
 
 
-def send_localizacao_clinica(telefone: str) -> dict:
-    mensagem = (
+def get_localizacao_clinica_texto() -> str:
+    return (
         "Localização da clínica:\n\n"
         f"{CLINICA_ENDERECO}\n\n"
         f"{CLINICA_MAPS_URL}"
     )
-    return send_whatsapp_message(telefone, mensagem)
+
+
+def send_localizacao_clinica(telefone: str) -> dict:
+    return send_whatsapp_message(telefone, get_localizacao_clinica_texto())
+
+
 def send_recomendacoes_pre_consulta(telefone: str) -> dict:
     mensagem = (
         "Recomendações pré-consulta do Dr. Paulo:\n\n"

@@ -25,6 +25,7 @@ from services.agendamento_service import (
 )
 from services.gemini import detectar_intencao, interpretar_data, responder_livre
 from services.whatsapp import (
+    get_localizacao_clinica_texto,
     get_pdf_planos_url,
     send_localizacao_clinica,
     send_pagamento_instrucoes,
@@ -77,6 +78,11 @@ _PERIODO_LABEL = {
     "manha": "manhã (09:00 às 12:00)",
     "tarde": "tarde (16:00 às 19:00)",
 }
+_TERMOS_LOCALIZACAO = {
+    "localização", "localizacao", "endereço", "endereco", "mapa",
+    "google maps", "como chegar", "onde fica", "onde e", "onde é",
+    "local do consultório", "local do consultorio",
+}
 
 
 def _registrar_envio_whatsapp(telefone: str, resultado: dict, tipo_mensagem: str | None = None) -> None:
@@ -98,6 +104,53 @@ def _registrar_envio_whatsapp(telefone: str, resultado: dict, tipo_mensagem: str
         payload=payload,
         resposta_api=response_data,
     )
+
+
+def _envio_whatsapp_sucesso(resultado: dict) -> bool:
+    response_data = resultado.get("response", {}) if isinstance(resultado, dict) else {}
+    return bool(response_data.get("messages"))
+
+
+def _pedido_localizacao_clinica(mensagem: str) -> bool:
+    msg = (mensagem or "").strip().lower()
+    if not msg:
+        return False
+    if any(termo in msg for termo in _TERMOS_LOCALIZACAO):
+        return True
+    return ("consultório" in msg or "consultorio" in msg) and ("fica" in msg or "endereço" in msg or "endereco" in msg)
+
+
+def _fallback_localizacao_clinica() -> str:
+    return (
+        "Nao consegui enviar a localizacao direto pelo WhatsApp agora.\n\n"
+        f"{get_localizacao_clinica_texto()}\n\n"
+        "Se preferir, posso te ajudar com mais orientacoes para chegar."
+    )
+
+
+def _responder_localizacao_clinica(telefone: str) -> BotResponse:
+    try:
+        resultado_localizacao = send_localizacao_clinica(telefone)
+        _registrar_envio_whatsapp(telefone, resultado_localizacao, "texto")
+
+        if _envio_whatsapp_sucesso(resultado_localizacao):
+            logger.info("Localizacao da clinica enviada com sucesso - telefone=%s", telefone)
+            return BotResponse(
+                texto=(
+                    "Acabei de te enviar a localizacao do consultorio aqui no WhatsApp. "
+                    "Se precisar de ajuda para chegar, posso te orientar tambem."
+                )
+            )
+
+        logger.warning(
+            "Envio da localizacao sem confirmacao de entrega - telefone=%s response=%s",
+            telefone,
+            (resultado_localizacao or {}).get("response"),
+        )
+    except Exception:
+        logger.exception("Falha ao enviar localizacao da clinica - telefone=%s", telefone)
+
+    return BotResponse(texto=_fallback_localizacao_clinica())
 
 
 def _enviar_boas_vindas(telefone: str) -> BotResponse:
@@ -715,6 +768,9 @@ def processar_mensagem(telefone: str, mensagem: str) -> BotResponse:
     mensagem_original = (mensagem or "").strip()
     mensagem = mensagem_original.lower()
     estado, dados = get_estado(telefone)
+
+    if _pedido_localizacao_clinica(mensagem_original):
+        return _responder_localizacao_clinica(telefone)
 
     if estado == "inicio":
         return _enviar_boas_vindas(telefone)

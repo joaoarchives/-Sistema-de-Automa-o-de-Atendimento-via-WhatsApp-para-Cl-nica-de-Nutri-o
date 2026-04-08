@@ -37,6 +37,39 @@ def test_processar_mensagem_inicio_envia_boas_vindas(monkeypatch):
     enviar_boas_vindas.assert_called_once_with(TELEFONE)
 
 
+def test_processar_mensagem_pedido_localizacao_so_confirma_envio_quando_sucesso(monkeypatch):
+    monkeypatch.setattr(bot, "registrar_cliente_se_nao_existir", lambda telefone: None)
+    monkeypatch.setattr(bot, "get_estado", lambda telefone: ("boas_vindas", {}))
+    send_localizacao = Mock(return_value={"response": {"messages": [{"id": "wamid.localizacao"}]}, "payload": {"type": "text"}})
+    registrar = Mock()
+    monkeypatch.setattr(bot, "send_localizacao_clinica", send_localizacao)
+    monkeypatch.setattr(bot, "_registrar_envio_whatsapp", registrar)
+
+    resposta = bot.processar_mensagem(TELEFONE, "Poderia me enviar a localização do consultório?")
+
+    assert "acabei de te enviar a localizacao" in resposta.texto.lower()
+    send_localizacao.assert_called_once_with(TELEFONE)
+    registrar.assert_called_once()
+
+
+def test_processar_mensagem_pedido_localizacao_faz_fallback_honesto_sem_confirmacao(monkeypatch):
+    monkeypatch.setattr(bot, "registrar_cliente_se_nao_existir", lambda telefone: None)
+    monkeypatch.setattr(bot, "get_estado", lambda telefone: ("boas_vindas", {}))
+    send_localizacao = Mock(return_value={"response": {}, "payload": {"type": "text"}})
+    registrar = Mock()
+    monkeypatch.setattr(bot, "send_localizacao_clinica", send_localizacao)
+    monkeypatch.setattr(bot, "_registrar_envio_whatsapp", registrar)
+
+    resposta = bot.processar_mensagem(TELEFONE, "Qual e o endereco do consultorio?")
+
+    assert "nao consegui enviar a localizacao" in resposta.texto.lower()
+    assert "rua da contagem" in resposta.texto.lower()
+    assert "google.com/maps" in resposta.texto.lower()
+    assert "acabei de te enviar" not in resposta.texto.lower()
+    send_localizacao.assert_called_once_with(TELEFONE)
+    registrar.assert_called_once()
+
+
 def test_handle_boas_vindas_saudacao_nao_reenvia_fluxo(monkeypatch):
     set_estado = Mock()
     monkeypatch.setattr(bot, "set_estado", set_estado)
