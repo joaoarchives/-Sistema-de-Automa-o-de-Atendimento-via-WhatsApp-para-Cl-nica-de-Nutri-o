@@ -39,6 +39,14 @@ app.register_blueprint(api_blueprint)
 VERIFY_TOKEN = os.getenv("WEBHOOK_VERIFY_TOKEN")
 WEBHOOK_APP_SECRET = (os.getenv("WHATSAPP_APP_SECRET") or os.getenv("WEBHOOK_APP_SECRET") or "").strip()
 
+logger.info(
+    "Webhook secrets carregados - WHATSAPP_APP_SECRET=%s WEBHOOK_APP_SECRET=%s secret_efetivo=%s tamanho=%s",
+    bool((os.getenv("WHATSAPP_APP_SECRET") or "").strip()),
+    bool((os.getenv("WEBHOOK_APP_SECRET") or "").strip()),
+    bool(WEBHOOK_APP_SECRET),
+    len(WEBHOOK_APP_SECRET),
+)
+
 
 def _validar_assinatura_webhook(raw_body: bytes) -> tuple[bool, str]:
     if not WEBHOOK_APP_SECRET:
