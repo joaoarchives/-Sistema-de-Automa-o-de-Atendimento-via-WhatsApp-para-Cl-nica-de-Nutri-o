@@ -28,13 +28,34 @@ def dados_agendamento():
 def test_processar_mensagem_inicio_envia_boas_vindas(monkeypatch):
     monkeypatch.setattr(bot, "registrar_cliente_se_nao_existir", lambda telefone: None)
     monkeypatch.setattr(bot, "get_estado", lambda telefone: ("inicio", {}))
-    enviar_boas_vindas = Mock()
+    enviar_boas_vindas = Mock(return_value=bot.BotResponse(texto=bot._BOAS_VINDAS))
     monkeypatch.setattr(bot, "_enviar_boas_vindas", enviar_boas_vindas)
 
     resposta = bot.processar_mensagem(TELEFONE, "oi")
 
-    assert resposta.texto == ""
+    assert resposta.texto == bot._BOAS_VINDAS
     enviar_boas_vindas.assert_called_once_with(TELEFONE)
+
+
+def test_handle_boas_vindas_saudacao_retorna_texto(monkeypatch):
+    enviar_boas_vindas = Mock(return_value=bot.BotResponse(texto=bot._BOAS_VINDAS))
+    monkeypatch.setattr(bot, "_enviar_boas_vindas", enviar_boas_vindas)
+
+    resposta = bot._handle_boas_vindas(TELEFONE, "oi", {})
+
+    assert resposta.texto == bot._BOAS_VINDAS
+    enviar_boas_vindas.assert_called_once_with(TELEFONE)
+
+
+def test_enviar_boas_vindas_retorna_texto_mesmo_sem_pdf(monkeypatch):
+    set_estado = Mock()
+    monkeypatch.setattr(bot, "set_estado", set_estado)
+    monkeypatch.setattr(bot, "get_pdf_planos_url", lambda: "")
+
+    resposta = bot._enviar_boas_vindas(TELEFONE)
+
+    assert resposta.texto == bot._BOAS_VINDAS
+    set_estado.assert_called_once_with(TELEFONE, "boas_vindas")
 
 
 def test_processar_mensagem_estado_desconhecido_retorna_menu(monkeypatch):

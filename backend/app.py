@@ -160,9 +160,30 @@ def receive_webhook():
                         resposta_api={},
                     )
 
-                    resposta = processar_mensagem(from_number, texto)
+                    try:
+                        resposta = processar_mensagem(from_number, texto)
+                    except Exception:
+                        logger.exception(
+                            "Erro ao processar mensagem do bot - de=%s tipo=%s id=%s texto=%r",
+                            from_number,
+                            msg_type,
+                            msg_id,
+                            texto[:120],
+                        )
+                        continue
+
+                    logger.info(
+                        "Resposta do bot gerada - de=%s tipo_resposta=%s texto_vazio=%s",
+                        from_number,
+                        getattr(resposta, "tipo", "texto"),
+                        not bool((getattr(resposta, "texto", "") or "").strip()),
+                    )
 
                     if not resposta.texto:
+                        logger.info(
+                            "Webhook sem envio de texto direto - de=%s motivo=resposta_vazia",
+                            from_number,
+                        )
                         continue
 
                     try:

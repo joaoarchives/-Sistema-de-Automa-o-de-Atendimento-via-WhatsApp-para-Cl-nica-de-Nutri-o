@@ -96,26 +96,25 @@ def _registrar_envio_whatsapp(telefone: str, resultado: dict, tipo_mensagem: str
     )
 
 
-def _enviar_boas_vindas(telefone: str) -> None:
+def _enviar_boas_vindas(telefone: str) -> BotResponse:
     set_estado(telefone, "boas_vindas")
-    try:
-        resultado_texto = send_whatsapp_message(telefone, _BOAS_VINDAS)
-        _registrar_envio_whatsapp(telefone, resultado_texto, "texto")
-    except Exception:
-        logger.exception("Erro ao enviar mensagem de boas-vindas")
-
     pdf_planos_url = get_pdf_planos_url()
-    if pdf_planos_url:
-        try:
-            resultado = send_whatsapp_document(
-                telefone,
-                pdf_planos_url,
-                "Planos_2026.pdf",
-                "Confira nossos planos 👆",
-            )
-            _registrar_envio_whatsapp(telefone, resultado, "document")
-        except Exception:
-            logger.exception("Erro ao enviar PDF dos planos")
+    if not pdf_planos_url:
+        logger.warning("PDF dos planos indisponível para boas-vindas - telefone=%s", telefone)
+        return BotResponse(texto=_BOAS_VINDAS)
+
+    try:
+        resultado = send_whatsapp_document(
+            telefone,
+            pdf_planos_url,
+            "Planos_2026.pdf",
+            "Confira nossos planos 👆",
+        )
+        _registrar_envio_whatsapp(telefone, resultado, "document")
+    except Exception:
+        logger.exception("Erro ao enviar PDF dos planos")
+
+    return BotResponse(texto=_BOAS_VINDAS)
 
 
 def _nome_dia(data_iso: str) -> str:
@@ -136,8 +135,7 @@ def _hoje_nome() -> str:
 
 def _handle_boas_vindas(telefone: str, mensagem: str, dados: dict) -> BotResponse:
     if mensagem in _SAUDACOES:
-        _enviar_boas_vindas(telefone)
-        return BotResponse(texto="")
+        return _enviar_boas_vindas(telefone)
 
     if mensagem in _AGRADECIMENTOS:
         set_estado(telefone, "boas_vindas", dados)
@@ -653,8 +651,7 @@ def processar_mensagem(telefone: str, mensagem: str) -> BotResponse:
     estado, dados = get_estado(telefone)
 
     if estado == "inicio":
-        _enviar_boas_vindas(telefone)
-        return BotResponse(texto="")
+        return _enviar_boas_vindas(telefone)
 
     if mensagem == "menu":
         set_estado(telefone, "menu")
