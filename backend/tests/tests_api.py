@@ -14,7 +14,6 @@ def client(monkeypatch):
     monkeypatch.setattr(api_module, "SECRET_KEY", "segredo-de-teste-com-32-bytes-ok")
     monkeypatch.setattr(api_module, "MEDICO_USER", "drpaulo")
     monkeypatch.setattr(api_module, "MEDICO_PASS_HASH", generate_password_hash("senha123"))
-    monkeypatch.setattr(api_module, "_LEGACY_PASSWORD_HASH", "")
     flask_app.config["TESTING"] = True
     return flask_app.test_client()
 
@@ -136,6 +135,31 @@ def test_login_invalido_registra_tentativa(client, monkeypatch):
     assert chamadas
 
 
+def test_auth_configurada_exige_secret_key_forte(monkeypatch):
+    monkeypatch.setattr(api_module, "SECRET_KEY", "curta")
+    monkeypatch.setattr(api_module, "MEDICO_USER", "drpaulo")
+    monkeypatch.setattr(api_module, "MEDICO_PASS_HASH", "hash")
+
+    assert api_module.auth_configurada() is False
+
+
+def test_auth_configurada_exige_medico_pass_hash(monkeypatch):
+    monkeypatch.setattr(api_module, "SECRET_KEY", "segredo-de-teste-com-32-bytes-ok")
+    monkeypatch.setattr(api_module, "MEDICO_USER", "drpaulo")
+    monkeypatch.setattr(api_module, "MEDICO_PASS_HASH", "")
+
+    assert api_module.auth_configurada() is False
+
+
+def test_login_falha_fechado_sem_medico_pass_hash(client, monkeypatch):
+    monkeypatch.setattr(api_module, "MEDICO_PASS_HASH", "")
+
+    resposta = client.post("/api/auth/login", json={"usuario": "drpaulo", "senha": "senha123"})
+
+    assert resposta.status_code == 503
+    assert "MEDICO_PASS_HASH" in resposta.get_json()["erro"]
+
+
 def test_historico_rejeita_pagina_invalida(client):
     resposta = client.get("/api/consultas/historico?pagina=abc", headers=auth_headers())
 
@@ -241,3 +265,44 @@ def test_confirmar_pagamento_nao_duplica_envio_com_lock_ativo(client, monkeypatc
     assert resposta.status_code == 200
     assert body["idempotente"] is True
     assert "processada" in body["aviso"].lower()
+
+
+def test_confirmar_pagamento_atualiza_estado_mesmo_quando_notificacao_falha(client, monkeypatch):
+    state = FakePaymentState({
+        "id": 1,
+        "status": "aguardando_pagamento",
+        "data": date(2026, 4, 10),
+        "horario": "09:00:00",
+        "telefone": "5538999999999",
+        "pagamento_confirmado_em": None,
+        "pagamento_notificacao_em_andamento": 0,
+        "pagamento_notificacao_lock_em": None,
+        "confirmacao_whatsapp_enviada_em": None,
+        "recomendacoes_whatsapp_enviadas_em": None,
+        "confirmacao_logada": 0,
+        "recomendacoes_logadas": 0,
+    })
+    chamadas_set_estado = []
+
+    monkeypatch.setattr("database.connection.get_db", lambda: fake_payment_db(state))
+    monkeypatch.setattr(
+        "services.whatsapp.send_whatsapp_message",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("falha no envio")),
+    )
+    monkeypatch.setattr("services.whatsapp.send_recomendacoes_pre_consulta", lambda telefone: {"response": {}, "payload": {"type": "text"}})
+    monkeypatch.setattr(api_module, "registrar_envio_whatsapp", lambda *args, **kwargs: None)
+    monkeypatch.setattr("database.estados.get_estado", lambda telefone: ("pagamento_em_analise", {}))
+    monkeypatch.setattr(
+        "database.estados.set_estado",
+        lambda telefone, estado, dados: chamadas_set_estado.append((telefone, estado, dados)),
+    )
+
+    resposta = client.patch("/api/consultas/1/confirmar-pagamento", headers=auth_headers())
+
+    body = resposta.get_json()
+    assert resposta.status_code == 200
+    assert body["status"] == "confirmado"
+    assert body["notificacao_enviada"] is False
+    assert body["estado_atualizado"] is True
+    assert chamadas_set_estado
+    assert chamadas_set_estado[0][1] == "consulta_confirmada"

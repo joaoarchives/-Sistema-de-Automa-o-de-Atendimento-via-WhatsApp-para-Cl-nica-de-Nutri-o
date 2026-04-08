@@ -184,10 +184,9 @@ SECRET_KEY=gere_uma_chave_forte_aqui
 
 # ── Painel administrativo ────────────────────────────────────────────────────
 # Usuário e senha do médico para acesso ao painel.
-# Prefira MEDICO_PASS_HASH (hash Werkzeug) em vez de MEDICO_PASS (texto puro, legado).
+# O painel exige MEDICO_PASS_HASH; MEDICO_PASS em texto puro não é aceito.
 MEDICO_USER=medico
 MEDICO_PASS_HASH=pbkdf2:sha256:...   # gere com: python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('suasenha'))"
-# MEDICO_PASS=suasenha              # alternativa legada; ignorada se MEDICO_PASS_HASH estiver definida
 
 # Máximo de tentativas de login antes do bloqueio (padrão: 5)
 LOGIN_MAX_TENTATIVAS=5
@@ -422,7 +421,7 @@ Defina dois serviços/dynos apontando para a mesma imagem:
 | Rate limiting de login | Após `LOGIN_MAX_TENTATIVAS` falhas (padrão 5), a combinação IP+usuário é bloqueada por `LOGIN_BLOQUEIO_MINUTOS` (padrão 15). Persistido em MySQL. |
 | Deduplicação de webhook | Cada `message_id` recebido é registrado na tabela `webhook_dedup`. Mensagens duplicadas são descartadas silenciosamente. |
 | Lock do scheduler | `GET_LOCK()` do MySQL garante que apenas uma instância do scheduler execute os jobs, mesmo com múltiplas réplicas. |
-| Senha do painel | Prefira `MEDICO_PASS_HASH` (hash Werkzeug/pbkdf2) em vez de `MEDICO_PASS` (texto puro). |
+| Senha do painel | Use somente `MEDICO_PASS_HASH` (hash Werkzeug/pbkdf2). `MEDICO_PASS` em texto puro não é aceito. |
 | Logs | O sistema loga tentativas de login, webhooks recebidos, mensagens processadas e erros sem expor valores de secrets. |
 | Lembretes | O scheduler usa controle explícito por consulta para lembrete_24h_enviado e lembrete_12h_enviado, evitando reenvio do mesmo lembrete. |
 
@@ -484,12 +483,11 @@ Nas primeiras horas após o deploy, valide:
 - **Uma única instância do scheduler por cluster**: o lock MySQL funciona corretamente apenas se todos os processos apontarem para o mesmo banco. Em setups multi-região com bancos separados, pode haver execução duplicada de jobs.
 - **Scheduler sem reinício automático**: se o processo scheduler encerrar por perda de lock (código de saída 1), é necessário um supervisor (systemd, Heroku restart policy, etc.) para reiniciá-lo.
 - **Estado da conversa em banco**: o estado de cada paciente (`database/estados.py`) é persistido no MySQL. Limpeza periódica de estados antigos não está automatizada no código analisado.
-- **`MEDICO_PASS` em texto puro**: se utilizado (modo legado), o valor fica carregado em memória no processo web. Migrar para `MEDICO_PASS_HASH` o quanto antes.
+- **`MEDICO_PASS_HASH` obrigatório**: o painel falha fechado com `503` se `MEDICO_USER` ou `MEDICO_PASS_HASH` não estiverem configurados corretamente.
 
 ---
 
 ## Licença
 
 Uso interno / privado. Todos os direitos reservados.
-
 

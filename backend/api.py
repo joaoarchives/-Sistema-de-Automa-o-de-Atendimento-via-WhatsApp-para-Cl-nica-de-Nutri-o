@@ -7,7 +7,7 @@ from pathlib import Path
 from functools import wraps
 
 from flask import Blueprint, Response, request, jsonify
-from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.security import check_password_hash
 
 from database.consultas import (
     get_consultas_hoje,
@@ -25,11 +25,10 @@ logger = logging.getLogger(__name__)
 
 SECRET_KEY = os.getenv("SECRET_KEY", "").strip()
 MEDICO_USER = os.getenv("MEDICO_USER", "").strip()
-MEDICO_PASS = os.getenv("MEDICO_PASS", "").strip()
 MEDICO_PASS_HASH = os.getenv("MEDICO_PASS_HASH", "").strip()
-_LEGACY_PASSWORD_HASH = generate_password_hash(MEDICO_PASS) if MEDICO_PASS else ""
 
 _SECRET_PLACEHOLDERS = {"", "chave_secreta", "dev_secret", "sua_chave_secreta", "secret"}
+_MIN_SECRET_KEY_LENGTH = 32
 _MAX_LOGIN_ATTEMPTS = int(os.getenv("LOGIN_MAX_TENTATIVAS", "5"))
 _LOGIN_BLOCK_MINUTES = int(os.getenv("LOGIN_BLOQUEIO_MINUTOS", "15"))
 _MAX_POR_PAGINA = int(os.getenv("HISTORICO_MAX_POR_PAGINA", "100"))
@@ -97,14 +96,19 @@ def get_client_ip() -> str:
 
 
 def get_password_hash() -> str:
-    return MEDICO_PASS_HASH or _LEGACY_PASSWORD_HASH
+    return MEDICO_PASS_HASH
+
+
+def auth_error_message() -> str:
+    return "Autenticação do painel não configurada: defina MEDICO_USER e MEDICO_PASS_HASH."
 
 
 def auth_configurada() -> bool:
     return (
         SECRET_KEY not in _SECRET_PLACEHOLDERS
+        and len(SECRET_KEY) >= _MIN_SECRET_KEY_LENGTH
         and bool(MEDICO_USER)
-        and bool(get_password_hash())
+        and bool(MEDICO_PASS_HASH)
     )
 
 
@@ -284,7 +288,7 @@ def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if not auth_configurada():
-            return jsonify({"erro": "Autenticação do painel não configurada"}), 503
+            return jsonify({"erro": auth_error_message()}), 503
         auth_header = request.headers.get("Authorization", "")
         if not auth_header.startswith("Bearer "):
             return jsonify({"erro": "Token não fornecido"}), 401
@@ -303,7 +307,7 @@ def token_required(f):
 def login():
     if not auth_configurada():
         logger.error("Tentativa de login com autenticação do painel não configurada.")
-        return jsonify({"erro": "Autenticação do painel não configurada"}), 503
+        return jsonify({"erro": auth_error_message()}), 503
 
     dados = request.get_json(silent=True)
     if not isinstance(dados, dict):
@@ -619,21 +623,20 @@ def confirmar_pagamento(consulta_id):
                 notificacao_enviada = False
                 avisos.append("As recomendacoes pre-consulta nao puderam ser enviadas ao paciente.")
 
-        try:
-            from database.estados import get_estado, set_estado
-            _, dados_atuais = get_estado(row["telefone"])
-            dados_atuais["data"] = row["data"].isoformat() if hasattr(row["data"], "isoformat") else str(row["data"])
-            dados_atuais["horario"] = horario_fmt
-            set_estado(row["telefone"], "consulta_confirmada", dados_atuais)
-            estado_atualizado = True
-        except Exception:
-            logger.exception("Erro ao atualizar estado da conversa apos confirmacao do pagamento.")
-            notificacao_enviada = False
-            avisos.append("O estado da conversa nao pode ser atualizado apos a confirmacao.")
     except Exception:
         logger.exception("Erro ao notificar cliente apos confirmacao do pagamento.")
         notificacao_enviada = False
         avisos.append("A consulta foi confirmada, mas houve falha ao notificar o paciente.")
+    try:
+        from database.estados import get_estado, set_estado
+        _, dados_atuais = get_estado(row["telefone"])
+        dados_atuais["data"] = row["data"].isoformat() if hasattr(row["data"], "isoformat") else str(row["data"])
+        dados_atuais["horario"] = horario_fmt
+        set_estado(row["telefone"], "consulta_confirmada", dados_atuais)
+        estado_atualizado = True
+    except Exception:
+        logger.exception("Erro ao atualizar estado da conversa apos confirmacao do pagamento.")
+        avisos.append("O estado da conversa nao pode ser atualizado apos a confirmacao.")
     finally:
         _mark_payment_notification_columns(consulta_id, clear_lock=True)
 

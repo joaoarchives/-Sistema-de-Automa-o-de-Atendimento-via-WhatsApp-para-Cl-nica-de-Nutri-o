@@ -103,6 +103,23 @@ def confirmar_agendamento(telefone: str, dados: dict) -> ResultadoAgendamento:
         plano_id=plano_id,
         medico_id=dados.get("medico_id", 1),
     )
+    if not consulta_id:
+        disponiveis, periodo_ativo = buscar_horarios_disponiveis(dados["data"], tipo_consulta, periodo)
+        if not disponiveis:
+            return ResultadoAgendamento(
+                sucesso=False,
+                mensagem=(
+                    "Esse horário acabou de ser ocupado e não há mais horários disponíveis.\n"
+                    "Digite outra data no formato DD/MM."
+                ),
+            )
+
+        return ResultadoAgendamento(
+            sucesso=False,
+            mensagem="Esse horário acabou de ser ocupado. Escolha outro horário:",
+            horarios_disponiveis=disponiveis,
+            periodo=periodo_ativo,
+        )
 
     try:
         avisar_medico_nova_consulta_hoje(telefone, dados["data"], dados["horario"])

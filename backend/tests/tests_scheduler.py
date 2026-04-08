@@ -146,6 +146,36 @@ def test_verificar_lembretes_nao_reenvia_flag_ja_marcada(monkeypatch):
     assert envios == []
 
 
+def test_verificar_lembretes_tolera_pequeno_atraso_do_scheduler(monkeypatch):
+    agora = datetime(2026, 4, 8, 12, 0, 5, tzinfo=UTC)
+    cursor = FakeCursor([
+        {
+            "id": 16,
+            "data": datetime(2026, 4, 9).date(),
+            "horario": timedelta(hours=12),
+            "telefone": "5538999999994",
+            "lembrete_24h_enviado": 0,
+            "lembrete_12h_enviado": 0,
+        }
+    ])
+    envios = []
+
+    monkeypatch.setattr(scheduler_module, "get_db", lambda: fake_db(cursor))
+    monkeypatch.setattr(scheduler_module, "utc_now", lambda: agora)
+    monkeypatch.setattr(
+        scheduler_module,
+        "local_schedule_to_utc",
+        lambda data, horario: agora + timedelta(hours=23, minutes=59, seconds=55),
+    )
+    monkeypatch.setattr(scheduler_module, "send_whatsapp_message", lambda telefone, mensagem: envios.append((telefone, mensagem)))
+
+    scheduler_module.verificar_lembretes()
+
+    assert len(envios) == 1
+    assert "Faltam 24h" in envios[0][1]
+    assert any("SET lembrete_24h_enviado = 1" in sql for sql, _ in cursor.executed)
+
+
 def test_verificar_lembretes_nao_envia_consulta_passada(monkeypatch):
     agora = datetime(2026, 4, 8, 12, 0, tzinfo=UTC)
     cursor = FakeCursor([

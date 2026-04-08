@@ -1,11 +1,16 @@
-﻿from datetime import date, timedelta
+import os
+from datetime import date, timedelta
 
-from database.connection import get_db
+from database.connection import get_db, get_direct_db_connection
 from utils.helpers import timedelta_para_hhmm
 from utils.time_utils import local_today, utc_now_naive
 
+_SLOT_LOCK_TIMEOUT_SECONDS = max(1, int(os.getenv("AGENDAMENTO_SLOT_LOCK_TIMEOUT_SECONDS", "5")))
 
-# ── Funções do bot ─────────────────────────────────────────────────────────────
+
+def _slot_lock_name(data: str, horario: str) -> str:
+    return f"consulta-slot:{data}:{horario}"
+
 
 def buscar_horarios_ocupados(data: str) -> list[str]:
     with get_db() as conn:
@@ -23,9 +28,9 @@ def buscar_horarios_ocupados(data: str) -> list[str]:
 
 def buscar_periodo_do_dia(data: str) -> str | None:
     """
-    Retorna o período já definido para um dia ('manha' ou 'tarde'),
+    Retorna o periodo ja definido para um dia ('manha' ou 'tarde'),
     determinado pela primeira consulta do dia (aguardando_pagamento ou confirmada).
-    Retorna None se o dia está livre.
+    Retorna None se o dia esta livre.
     """
     with get_db() as conn:
         cursor = conn.cursor(dictionary=True)
@@ -71,8 +76,32 @@ def salvar_consulta(
 ) -> int:
     """Salva consulta com status aguardando_pagamento. Retorna o id gerado."""
     expira_em = utc_now_naive() + timedelta(hours=1)
-    with get_db() as conn:
-        cursor = conn.cursor()
+    conn = get_direct_db_connection()
+    cursor = conn.cursor()
+    lock_name = _slot_lock_name(data, horario)
+    lock_acquired = False
+
+    try:
+        cursor.execute("SELECT GET_LOCK(%s, %s)", (lock_name, _SLOT_LOCK_TIMEOUT_SECONDS))
+        row = cursor.fetchone()
+        lock_acquired = bool(row and row[0] == 1)
+        if not lock_acquired:
+            raise RuntimeError("Nao foi possivel obter exclusividade para reservar o horario.")
+
+        cursor.execute(
+            """
+            SELECT id FROM consultas
+            WHERE data = %s
+              AND horario = %s
+              AND status IN ('aguardando_pagamento', 'confirmado')
+            LIMIT 1
+            """,
+            (data, f"{horario}:00"),
+        )
+        if cursor.fetchone():
+            conn.rollback()
+            return 0
+
         cursor.execute(
             """
             INSERT INTO consultas
@@ -83,7 +112,26 @@ def salvar_consulta(
             """,
             (plano_id, tipo_consulta, data, f"{horario}:00", expira_em, medico_id, telefone),
         )
-        return cursor.lastrowid
+        consulta_id = cursor.lastrowid
+        if not consulta_id:
+            conn.rollback()
+            return 0
+
+        conn.commit()
+        return consulta_id
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        if lock_acquired:
+            try:
+                release_cursor = conn.cursor()
+                release_cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name,))
+                release_cursor.close()
+            except Exception:
+                pass
+        cursor.close()
+        conn.close()
 
 
 def cancelar_ultima_consulta(telefone: str, motivo: str = "Cancelado pelo paciente via WhatsApp") -> bool:
@@ -140,8 +188,6 @@ def buscar_plano_por_codigo(codigo: str) -> dict | None:
         )
         return cursor.fetchone()
 
-
-# ── Funções do painel ──────────────────────────────────────────────────────────
 
 def get_consultas_hoje(data_referencia=None):
     data_referencia = data_referencia or local_today()

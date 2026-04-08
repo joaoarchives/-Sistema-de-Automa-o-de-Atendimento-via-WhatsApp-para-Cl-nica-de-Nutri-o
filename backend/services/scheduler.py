@@ -61,6 +61,7 @@ def expirar_pagamentos_pendentes() -> None:
 
 def verificar_lembretes() -> None:
     agora = utc_now()
+    janela_inicio = agora - _LEMBRETE_INTERVALO_EXECUCAO
     limite = agora + _LEMBRETE_INTERVALO_EXECUCAO
 
     with get_db() as conn:
@@ -89,12 +90,12 @@ def verificar_lembretes() -> None:
             lembrete_tipo = None
             if not bool(consulta.get("lembrete_24h_enviado")):
                 alvo_24h = data_hora_utc - _LEMBRETE_24H
-                if agora <= alvo_24h <= limite:
+                if janela_inicio <= alvo_24h <= limite:
                     lembrete_tipo = "24h"
 
             if lembrete_tipo is None and not bool(consulta.get("lembrete_12h_enviado")):
                 alvo_12h = data_hora_utc - _LEMBRETE_12H
-                if agora <= alvo_12h <= limite:
+                if janela_inicio <= alvo_12h <= limite:
                     lembrete_tipo = "12h"
 
             if lembrete_tipo is None:
@@ -107,30 +108,33 @@ def verificar_lembretes() -> None:
                 f"Horario: {horario_fmt}\n\n"
                 "Em caso de necessidade, responda esta mensagem."
             )
-            send_whatsapp_message(consulta["telefone"], mensagem)
-            if lembrete_tipo == "24h":
-                cursor.execute(
-                    """
-                    UPDATE consultas
-                    SET lembrete_24h_enviado = 1,
-                        lembrete_enviado = 1
-                    WHERE id = %s
-                      AND lembrete_24h_enviado = 0
-                    """,
-                    (consulta["id"],),
-                )
-            else:
-                cursor.execute(
-                    """
-                    UPDATE consultas
-                    SET lembrete_12h_enviado = 1,
-                        lembrete_enviado = 1
-                    WHERE id = %s
-                      AND lembrete_12h_enviado = 0
-                    """,
-                    (consulta["id"],),
-                )
-            logger.info("Lembrete %s enviado para consulta %s.", lembrete_tipo, consulta["id"])
+            try:
+                send_whatsapp_message(consulta["telefone"], mensagem)
+                if lembrete_tipo == "24h":
+                    cursor.execute(
+                        """
+                        UPDATE consultas
+                        SET lembrete_24h_enviado = 1,
+                            lembrete_enviado = 1
+                        WHERE id = %s
+                          AND lembrete_24h_enviado = 0
+                        """,
+                        (consulta["id"],),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE consultas
+                        SET lembrete_12h_enviado = 1,
+                            lembrete_enviado = 1
+                        WHERE id = %s
+                          AND lembrete_12h_enviado = 0
+                        """,
+                        (consulta["id"],),
+                    )
+                logger.info("Lembrete %s enviado para consulta %s.", lembrete_tipo, consulta["id"])
+            except Exception:
+                logger.exception("Erro ao enviar lembrete %s para consulta %s.", lembrete_tipo, consulta["id"])
 
 
 _JOB_DEFINITIONS = (

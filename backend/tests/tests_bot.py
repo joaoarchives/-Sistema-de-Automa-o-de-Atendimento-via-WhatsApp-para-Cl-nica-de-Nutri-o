@@ -335,3 +335,24 @@ def test_confirmar_agendamento_indisponivel_sem_vagas(monkeypatch, dados_agendam
     assert resultado.sucesso is False
     assert resultado.horarios_disponiveis == []
     assert "Digite outra data" in resultado.mensagem
+
+
+def test_confirmar_agendamento_detecta_corrida_apos_precheck(monkeypatch, dados_agendamento):
+    monkeypatch.setattr(agendamento_service, "buscar_plano_por_codigo", lambda codigo: {"id": 7})
+    monkeypatch.setattr(agendamento_service, "horario_esta_disponivel", lambda data, horario: True)
+    monkeypatch.setattr(agendamento_service, "atualizar_cliente", lambda *args, **kwargs: None)
+    monkeypatch.setattr(agendamento_service, "salvar_consulta", lambda *args, **kwargs: 0)
+    monkeypatch.setattr(
+        agendamento_service,
+        "buscar_horarios_disponiveis",
+        lambda data, tipo, periodo: (["10:00", "10:30"], "manha"),
+    )
+    avisar_medico = Mock()
+    monkeypatch.setattr(agendamento_service, "avisar_medico_nova_consulta_hoje", avisar_medico)
+
+    resultado = agendamento_service.confirmar_agendamento(TELEFONE, dados_agendamento)
+
+    assert resultado.sucesso is False
+    assert resultado.horarios_disponiveis == ["10:00", "10:30"]
+    assert "ocupado" in resultado.mensagem.lower()
+    avisar_medico.assert_not_called()
