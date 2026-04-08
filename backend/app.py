@@ -3,6 +3,7 @@ import hmac
 import logging
 import os
 from pathlib import Path
+from threading import Lock
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory
@@ -11,6 +12,7 @@ from flask_cors import CORS
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from services.bot_response import BotResponse
+from database.init_db import init_db
 from database.mensagens import atualizar_status_whatsapp, salvar_log_whatsapp
 from database.estados import get_estado
 from database.runtime_guards import register_processed_webhook_message
@@ -55,6 +57,50 @@ logger.info(
     len(WEBHOOK_APP_SECRET),
     os.getenv("DEBUG_SECRET_TEST"),
 )
+
+_db_bootstrap_lock = Lock()
+_db_bootstrap_done = False
+
+
+def _requires_database_bootstrap() -> bool:
+    if app.config.get("TESTING"):
+        return False
+
+    path = request.path or ""
+    if path == "/health":
+        return False
+    if path == "/webhook" and request.method == "GET":
+        return False
+    return path.startswith("/api/") or path == "/webhook"
+
+
+def ensure_database_ready() -> None:
+    global _db_bootstrap_done
+    if _db_bootstrap_done:
+        return
+
+    with _db_bootstrap_lock:
+        if _db_bootstrap_done:
+            return
+        init_db()
+        _db_bootstrap_done = True
+        logger.info("Schema do banco verificado/inicializado antes das rotas de aplicacao.")
+
+
+@app.before_request
+def bootstrap_database_schema():
+    if not _requires_database_bootstrap():
+        return None
+
+    try:
+        ensure_database_ready()
+    except Exception:
+        logger.exception("Falha ao inicializar/verificar schema do banco antes da requisicao.")
+        return jsonify({
+            "status": "error",
+            "erro": "Falha ao inicializar o banco de dados",
+        }), 503
+    return None
 
 
 def _validar_assinatura_webhook(raw_body: bytes) -> tuple[bool, str]:

@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 import app as app_module
+import api as api_module
 from services.bot_response import BotResponse
 
 
@@ -94,3 +95,30 @@ def test_webhook_ignora_mensagem_duplicada(client, monkeypatch):
     assert resposta_2.status_code == 200
     processar_mensagem.assert_called_once_with("5538999999999", "oi")
     send_whatsapp.assert_called_once()
+
+
+def test_api_bootstrap_schema_antes_das_rotas(client, monkeypatch):
+    app_module.app.config["TESTING"] = False
+    chamadas = []
+
+    monkeypatch.setattr(app_module, "ensure_database_ready", lambda: chamadas.append("ok"))
+    monkeypatch.setattr(api_module, "auth_configurada", lambda: True)
+
+    resposta = client.get("/api/consultas/historico")
+
+    assert resposta.status_code == 401
+    assert chamadas == ["ok"]
+
+
+def test_api_retorna_503_quando_bootstrap_schema_falha(client, monkeypatch):
+    app_module.app.config["TESTING"] = False
+
+    def quebrar_bootstrap():
+        raise RuntimeError("db indisponivel")
+
+    monkeypatch.setattr(app_module, "ensure_database_ready", quebrar_bootstrap)
+
+    resposta = client.get("/api/consultas/historico")
+
+    assert resposta.status_code == 503
+    assert "banco" in resposta.get_json()["erro"].lower()
