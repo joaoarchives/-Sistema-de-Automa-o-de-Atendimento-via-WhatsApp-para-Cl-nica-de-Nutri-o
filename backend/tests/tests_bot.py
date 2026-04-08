@@ -37,14 +37,14 @@ def test_processar_mensagem_inicio_envia_boas_vindas(monkeypatch):
     enviar_boas_vindas.assert_called_once_with(TELEFONE)
 
 
-def test_handle_boas_vindas_saudacao_retorna_texto(monkeypatch):
-    enviar_boas_vindas = Mock(return_value=bot.BotResponse(texto=bot._BOAS_VINDAS))
-    monkeypatch.setattr(bot, "_enviar_boas_vindas", enviar_boas_vindas)
+def test_handle_boas_vindas_saudacao_nao_reenvia_fluxo(monkeypatch):
+    set_estado = Mock()
+    monkeypatch.setattr(bot, "set_estado", set_estado)
 
     resposta = bot._handle_boas_vindas(TELEFONE, "oi", {})
 
-    assert resposta.texto == bot._BOAS_VINDAS
-    enviar_boas_vindas.assert_called_once_with(TELEFONE)
+    assert "Posso te ajudar" in resposta.texto
+    set_estado.assert_called_once_with(TELEFONE, "boas_vindas", {})
 
 
 def test_enviar_boas_vindas_retorna_texto_mesmo_sem_pdf(monkeypatch):
@@ -206,6 +206,64 @@ def test_processar_comprovante_move_para_analise(monkeypatch):
 
     assert "Comprovante recebido" in resposta.texto
     set_estado.assert_called_once_with(TELEFONE, "pagamento_em_analise", {"consulta_id": 12})
+
+
+def test_handle_pagamento_em_analise_ok_nao_chama_gemini(monkeypatch):
+    set_estado = Mock()
+    detectar = Mock(side_effect=AssertionError("nao deveria detectar intencao para ack curto"))
+    responder = Mock(side_effect=AssertionError("nao deveria chamar gemini para ack curto"))
+    monkeypatch.setattr(bot, "set_estado", set_estado)
+    monkeypatch.setattr(bot, "detectar_intencao", detectar)
+    monkeypatch.setattr(bot, "responder_livre", responder)
+
+    resposta = bot._handle_pagamento_em_analise(TELEFONE, "ok", {"consulta_id": 12})
+
+    assert "em análise" in resposta.texto or "em análise" in resposta.texto.lower()
+    set_estado.assert_called_once_with(TELEFONE, "pagamento_em_analise", {"consulta_id": 12})
+
+
+def test_handle_consulta_confirmada_saudacao_nao_reinicia_fluxo(monkeypatch, dados_agendamento):
+    set_estado = Mock()
+    cancelar = Mock(side_effect=AssertionError("nao deveria cancelar consulta"))
+    detectar = Mock(side_effect=AssertionError("nao deveria detectar intencao"))
+    responder = Mock(side_effect=AssertionError("nao deveria chamar gemini"))
+    monkeypatch.setattr(bot, "set_estado", set_estado)
+    monkeypatch.setattr(bot, "cancelar_consulta", cancelar)
+    monkeypatch.setattr(bot, "detectar_intencao", detectar)
+    monkeypatch.setattr(bot, "responder_livre", responder)
+
+    resposta = bot._handle_consulta_confirmada(TELEFONE, "boa noite", dados_agendamento)
+
+    assert "consulta segue confirmada" in resposta.texto.lower()
+    set_estado.assert_called_once_with(TELEFONE, "consulta_confirmada", dados_agendamento)
+
+
+def test_handle_consulta_confirmada_agendar_generico_nao_cancela(monkeypatch, dados_agendamento):
+    set_estado = Mock()
+    cancelar = Mock()
+    monkeypatch.setattr(bot, "set_estado", set_estado)
+    monkeypatch.setattr(bot, "cancelar_consulta", cancelar)
+
+    resposta = bot._handle_consulta_confirmada(TELEFONE, "quero outra consulta", dados_agendamento)
+
+    assert "já está confirmada" in resposta.texto.lower()
+    cancelar.assert_not_called()
+    set_estado.assert_called_once_with(TELEFONE, "consulta_confirmada", dados_agendamento)
+
+
+def test_handle_consulta_confirmada_fallback_contextual_sem_instabilidade(monkeypatch, dados_agendamento):
+    monkeypatch.setattr(
+        bot,
+        "responder_livre",
+        lambda mensagem: "Desculpe, estou com uma instabilidade no momento. Para agendar uma consulta, digite 1. Para cancelar, digite 2.",
+    )
+    set_estado = Mock()
+    monkeypatch.setattr(bot, "set_estado", set_estado)
+
+    resposta = bot._handle_consulta_confirmada(TELEFONE, "tenho uma dúvida rápida", dados_agendamento)
+
+    assert "instabilidade" not in resposta.texto.lower()
+    assert "consulta segue confirmada" in resposta.texto.lower()
 
 
 def test_processar_mensagem_converte_horarios_em_lista(monkeypatch):

@@ -69,6 +69,10 @@ _AGRADECIMENTOS = {
     "entendido", "certo obrigado", "beleza", "👍", "🙏",
 }
 
+_DESPEDIDAS = {"tchau", "até", "ate", "até logo", "ate logo", "falou", "ok tchau", "obrigado tchau"}
+_AFIRMACOES_CURTAS = _SIM | {"ok", "beleza", "blz", "joia", "tranquilo", "perfeito", "entendi", "entendido"}
+_GEMINI_FALLBACK_PREFIX = "Desculpe, estou com uma instabilidade no momento."
+
 _PERIODO_LABEL = {
     "manha": "manhã (09:00 às 12:00)",
     "tarde": "tarde (16:00 às 19:00)",
@@ -117,6 +121,40 @@ def _enviar_boas_vindas(telefone: str) -> BotResponse:
     return BotResponse(texto=_BOAS_VINDAS)
 
 
+def _eh_mensagem_curta_contextual(mensagem: str) -> bool:
+    msg = (mensagem or "").strip().lower()
+    if not msg:
+        return True
+    if msg in _SAUDACOES or msg in _AGRADECIMENTOS or msg in _DESPEDIDAS or msg in _AFIRMACOES_CURTAS:
+        return True
+    return len(msg.split()) <= 2 and "?" not in msg
+
+
+def _responder_livre_contextual(mensagem: str, fallback: str) -> str:
+    resposta = (responder_livre(mensagem) or "").strip()
+    if not resposta or resposta.startswith(_GEMINI_FALLBACK_PREFIX):
+        logger.warning(
+            "Fallback contextual aplicado apos resposta livre vazia/instavel - mensagem=%r",
+            (mensagem or "")[:120],
+        )
+        return fallback
+    return resposta
+
+
+def _pedido_expresso_de_reagendamento(mensagem: str) -> bool:
+    msg = (mensagem or "").strip().lower()
+    return any(kw in msg for kw in _REAGENDAR)
+
+
+def _pedido_expresso_de_novo_agendamento(mensagem: str) -> bool:
+    msg = (mensagem or "").strip().lower()
+    termos = {
+        "agendar outra", "marcar outra", "nova consulta", "outra consulta",
+        "agendar de novo", "marcar de novo", "quero outra consulta",
+    }
+    return any(termo in msg for termo in termos)
+
+
 def _nome_dia(data_iso: str) -> str:
     try:
         dt = datetime.strptime(data_iso, "%Y-%m-%d")
@@ -135,7 +173,10 @@ def _hoje_nome() -> str:
 
 def _handle_boas_vindas(telefone: str, mensagem: str, dados: dict) -> BotResponse:
     if mensagem in _SAUDACOES:
-        return _enviar_boas_vindas(telefone)
+        set_estado(telefone, "boas_vindas", dados)
+        return BotResponse(texto=(
+            "Oi! 😊 Posso te ajudar com alguma dúvida ou, se preferir, já seguimos com o agendamento da consulta."
+        ))
 
     if mensagem in _AGRADECIMENTOS:
         set_estado(telefone, "boas_vindas", dados)
@@ -157,7 +198,10 @@ def _handle_boas_vindas(telefone: str, mensagem: str, dados: dict) -> BotRespons
             "Até logo! 😊"
         ))
 
-    resposta_gemini = responder_livre(mensagem)
+    resposta_gemini = _responder_livre_contextual(
+        mensagem,
+        "Posso te ajudar com alguma dúvida sobre os planos e serviços ou, se preferir, seguimos com o agendamento da consulta.",
+    )
     set_estado(telefone, "boas_vindas", dados)
     return BotResponse(texto=(
         f"{resposta_gemini}\n\n"
@@ -518,8 +562,11 @@ def _handle_confirmacao(telefone: str, mensagem: str, dados: dict) -> BotRespons
 
 
 def _handle_aguardando_comprovante(telefone: str, mensagem: str, dados: dict) -> BotResponse:
-    if mensagem in _AGRADECIMENTOS:
+    if mensagem in _AGRADECIMENTOS or mensagem in _SAUDACOES or mensagem in _AFIRMACOES_CURTAS:
         return BotResponse(texto="De nada! 😊 Assim que o Dr. Paulo confirmar o pagamento, você receberá uma mensagem.")
+
+    if mensagem in _DESPEDIDAS:
+        return BotResponse(texto="Tudo certo! Quando puder, envie a imagem do comprovante aqui nesta conversa. 📎")
 
     return BotResponse(texto=(
         "Estamos aguardando o comprovante de pagamento. 📎\n\n"
@@ -528,7 +575,25 @@ def _handle_aguardando_comprovante(telefone: str, mensagem: str, dados: dict) ->
 
 
 def _handle_pagamento_em_analise(telefone: str, mensagem: str, dados: dict) -> BotResponse:
-    intencao = detectar_intencao(mensagem)
+    if mensagem in _AGRADECIMENTOS or mensagem in _SAUDACOES or mensagem in _AFIRMACOES_CURTAS:
+        set_estado(telefone, "pagamento_em_analise", dados)
+        return BotResponse(texto=(
+            "Perfeito! 🙏 Seu comprovante já está em análise.\n\n"
+            "Assim que o Dr. Paulo confirmar o pagamento, eu te aviso por aqui."
+        ))
+
+    if mensagem in _DESPEDIDAS:
+        return BotResponse(texto=(
+            "Tudo certo! 🙏 Seu comprovante segue em análise e eu te aviso assim que o pagamento for confirmado."
+        ))
+
+    if _pedido_expresso_de_novo_agendamento(mensagem):
+        return BotResponse(texto=(
+            "Seu comprovante ainda está em análise. 🙏\n\n"
+            "Depois que esse pagamento for confirmado, se você quiser marcar outra consulta, eu te ajudo por aqui."
+        ))
+
+    intencao = detectar_intencao(mensagem) if not _eh_mensagem_curta_contextual(mensagem) else "duvida"
 
     if intencao == "recusar":
         return BotResponse(texto=(
@@ -537,14 +602,10 @@ def _handle_pagamento_em_analise(telefone: str, mensagem: str, dados: dict) -> B
             "Até logo! 💪"
         ))
 
-    if intencao == "agendar":
-        return BotResponse(texto=(
-            "Seu comprovante está em análise. 🙏\n\n"
-            "Assim que o pagamento for confirmado, ficará tudo certo! "
-            "Caso queira agendar outra consulta, é só nos contatar depois."
-        ))
-
-    resposta_gemini = responder_livre(mensagem)
+    resposta_gemini = _responder_livre_contextual(
+        mensagem,
+        "Seu comprovante está em análise. 🙏 Se precisar de algo enquanto isso, pode me chamar aqui.",
+    )
     set_estado(telefone, "pagamento_em_analise", dados)
     return BotResponse(texto=(
         f"{resposta_gemini}\n\n"
@@ -562,12 +623,18 @@ _REAGENDAR = {
 
 
 def _handle_consulta_confirmada(telefone: str, mensagem: str, dados: dict) -> BotResponse:
-    if mensagem in _AGRADECIMENTOS:
+    if mensagem in _AGRADECIMENTOS or mensagem in _AFIRMACOES_CURTAS or mensagem in _SAUDACOES:
         set_estado(telefone, "consulta_confirmada", dados)
-        return BotResponse(texto="De nada! 😊 Até o dia da consulta! 💪")
+        return BotResponse(texto=(
+            "Perfeito! 😊 Sua consulta segue confirmada. Se precisar de algo antes do atendimento, é só me chamar."
+        ))
+
+    if mensagem in _DESPEDIDAS:
+        set_estado(telefone, "consulta_confirmada", dados)
+        return BotResponse(texto="Até logo! Sua consulta segue confirmada. 😊")
 
     msg_lower = mensagem.strip().lower()
-    quer_reagendar = any(kw in msg_lower for kw in _REAGENDAR)
+    quer_reagendar = _pedido_expresso_de_reagendamento(msg_lower)
 
     if quer_reagendar:
         cancelar_consulta(telefone)
@@ -590,16 +657,12 @@ def _handle_consulta_confirmada(telefone: str, mensagem: str, dados: dict) -> Bo
             }],
         )
 
-    intencao = detectar_intencao(mensagem)
-
-    if intencao == "agendar":
-        cancelar_consulta(telefone)
-        set_estado(telefone, "menu")
-        return _handle_menu(telefone, "1", {})
-
-    if intencao == "recusar":
+    if _pedido_expresso_de_novo_agendamento(msg_lower):
         set_estado(telefone, "consulta_confirmada", dados)
-        return BotResponse(texto="Até logo! Se precisar de algo, é só chamar. 😊")
+        return BotResponse(texto=(
+            "Sua consulta atual já está confirmada. 😊\n\n"
+            "Se quiser remarcar ou agendar outra consulta depois, é só me avisar com mais detalhes."
+        ))
 
     data_fmt = formatar_data_br(dados.get("data", "")) if dados.get("data") else ""
     horario_fmt = dados.get("horario", "")
@@ -611,7 +674,10 @@ def _handle_consulta_confirmada(telefone: str, mensagem: str, dados: dict) -> Bo
             + (f" às {horario_fmt}" if horario_fmt else "")
             + f"] {mensagem}"
         )
-    resposta_gemini = responder_livre(contexto)
+    resposta_gemini = _responder_livre_contextual(
+        contexto,
+        "Sua consulta segue confirmada. Se quiser tirar alguma dúvida antes do atendimento ou precisar reagendar, é só me dizer.",
+    )
     set_estado(telefone, "consulta_confirmada", dados)
     return BotResponse(texto=resposta_gemini)
 
